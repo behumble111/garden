@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>花园世界 · 公会花卉图鉴</title>
+
+<style>
+    *{
+        margin:0;
+        padding:0;
+        box-sizing:border-box;
+        font-family:"Microsoft YaHei",sans-serif;
+    }
+
+    body{
+        background:#f4f0ff;
+        color:#333;
+        min-height:100vh;
+    }
+
+    header{
+        background:linear-gradient(135deg,#8b5cf6,#c084fc);
+        color:white;
+        padding:25px;
+        text-align:center;
+        box-shadow:0 4px 10px rgba(0,0,0,.15);
+    }
+
+    header h1{
+        font-size:32px;
+        margin-bottom:8px;
+    }
+
+    header p{
+        opacity:.9;
+    }
+
+    .container{
+        width:95%;
+        max-width:1300px;
+        margin:30px auto;
+    }
+
+    .top-bar{
+        display:flex;
+        gap:15px;
+        flex-wrap:wrap;
+        margin-bottom:25px;
+    }
+
+    .search-box{
+        flex:1;
+        min-width:260px;
+    }
+
+    input{
+        width:100%;
+        padding:14px;
+        border:none;
+        border-radius:14px;
+        font-size:16px;
+        box-shadow:0 3px 8px rgba(0,0,0,.08);
+    }
+
+    button{
+        padding:14px 22px;
+        border:none;
+        border-radius:14px;
+        background:#8b5cf6;
+        color:white;
+        cursor:pointer;
+        font-size:15px;
+        transition:.2s;
+    }
+
+    button:hover{
+        background:#7c3aed;
+        transform:translateY(-1px);
+    }
+
+    .player-card{
+        background:white;
+        border-radius:22px;
+        padding:25px;
+        box-shadow:0 6px 18px rgba(0,0,0,.08);
+        margin-bottom:25px;
+    }
+
+    .player-header{
+        display:flex;
+        justify-content:space-between;
+        align-items:center;
+        margin-bottom:18px;
+        flex-wrap:wrap;
+        gap:10px;
+    }
+
+    .player-name{
+        font-size:28px;
+        font-weight:bold;
+        color:#6d28d9;
+    }
+
+    .flower-count{
+        background:#ede9fe;
+        color:#6d28d9;
+        padding:8px 14px;
+        border-radius:999px;
+        font-weight:bold;
+    }
+
+    .section-title{
+        margin:18px 0;
+        font-size:20px;
+        color:#7c3aed;
+    }
+
+    .flower-grid{
+        display:grid;
+        grid-template-columns:repeat(auto-fill,minmax(180px,1fr));
+        gap:18px;
+    }
+
+    .flower-card{
+        background:#faf7ff;
+        border-radius:18px;
+        padding:15px;
+        text-align:center;
+        transition:.25s;
+        border:2px solid #e9d5ff;
+    }
+
+    .flower-card:hover{
+        transform:translateY(-4px);
+        box-shadow:0 8px 18px rgba(139,92,246,.18);
+    }
+
+    .flower-card img{
+        width:100%;
+        height:180px;
+        object-fit:cover;
+        border-radius:14px;
+        margin-bottom:12px;
+    }
+
+    .flower-name{
+        font-size:18px;
+        font-weight:bold;
+        margin-bottom:8px;
+    }
+
+    .rarity{
+        display:inline-block;
+        padding:5px 12px;
+        border-radius:999px;
+        font-size:13px;
+        color:white;
+    }
+
+    .purple{
+        background:linear-gradient(135deg,#9333ea,#7e22ce);
+    }
+
+    .add-panel{
+        background:white;
+        border-radius:22px;
+        padding:25px;
+        box-shadow:0 6px 18px rgba(0,0,0,.08);
+        margin-top:30px;
+    }
+
+    .form-grid{
+        display:grid;
+        grid-template-columns:repeat(auto-fit,minmax(220px,1fr));
+        gap:15px;
+        margin-top:18px;
+    }
+
+    .empty{
+        text-align:center;
+        padding:50px;
+        color:#888;
+        font-size:18px;
+    }
+
+    footer{
+        text-align:center;
+        padding:25px;
+        color:#777;
+    }
+
+    @media(max-width:700px){
+        .player-name{
+            font-size:22px;
+        }
+
+        .flower-grid{
+            grid-template-columns:repeat(auto-fill,minmax(150px,1fr));
+        }
+    }
+</style>
+</head>
+
+<body>
+
+<header>
+    <h1>🌸 花园世界 · 公会花卉图鉴</h1>
+    <p>用于查询玩家拥有的花卉，避免误删稀有花</p>
+</header>
+
+<div class="container">
+
+    <div class="top-bar">
+        <div class="search-box">
+            <input type="text" id="searchInput" placeholder="搜索玩家ID 或 花名...">
+        </div>
+        <button onclick="searchData()">搜索</button>
+        <button onclick="resetSearch()">重置</button>
+    </div>
+
+    <div id="playersContainer"></div>
+
+    <div class="add-panel">
+        <h2>➕ 添加新花卉记录</h2>
+
+        <div class="form-grid">
+            <input type="text" id="newPlayer" placeholder="玩家ID">
+            <input type="text" id="newFlower" placeholder="花名">
+            <input type="text" id="newRarity" placeholder="稀有度（例如：紫色）">
+            <input type="text" id="newImage" placeholder="图片链接（可选）">
+        </div>
+
+        <div style="margin-top:20px;">
+            <button onclick="addFlower()">添加记录</button>
+        </div>
+    </div>
+
+</div>
+
+<footer>
+    花园世界图鉴系统 · 可持续扩展更多玩家与花卉
+</footer>
+
+<script>
+
+const players = [
+    {
+        id:"香瓜子",
+        flowers:[
+            {
+                name:"冰蓝矮牵牛",
+                rarity:"紫色",
+                image:"冰蓝矮牵牛.jpg"
+            },
+            {
+                name:"粉红木槿花",
+                rarity:"紫色",
+                image:"粉红木槿花.jpg"
+            },
+            {
+                name:"毛蕊紫银莲",
+                rarity:"紫色",
+                image:"毛蕊紫银莲.jpg"
+            },
+            {
+                name:"泼墨",
+                rarity:"紫色",
+                image:"泼墨.jpg"
+            },
+            {
+                name:"青山银桂",
+                rarity:"紫色",
+                image:"青山银桂.jpg"
+            }
+        ]
+    }
+];
+
+function renderPlayers(data){
+
+    const container = document.getElementById("playersContainer");
+
+    if(data.length === 0){
+        container.innerHTML = `
+            <div class="empty">
+                未找到相关数据
+            </div>
+        `;
+        return;
+    }
+
+    container.innerHTML = "";
+
+    data.forEach(player=>{
+
+        const card = document.createElement("div");
+        card.className = "player-card";
+
+        let flowerHTML = "";
+
+        player.flowers.forEach(flower=>{
+
+            flowerHTML += `
+                <div class="flower-card">
+                    <img src="${flower.image}" alt="${flower.name}">
+                    <div class="flower-name">${flower.name}</div>
+                    <span class="rarity purple">${flower.rarity}</span>
+                </div>
+            `;
+        });
+
+        card.innerHTML = `
+            <div class="player-header">
+                <div class="player-name">${player.id}</div>
+                <div class="flower-count">
+                    共 ${player.flowers.length} 种花
+                </div>
+            </div>
+
+            <div class="section-title">🌺 花卉收藏</div>
+
+            <div class="flower-grid">
+                ${flowerHTML}
+            </div>
+        `;
+
+        container.appendChild(card);
+
+    });
+
+}
+
+function searchData(){
+
+    const keyword = document
+        .getElementById("searchInput")
+        .value
+        .trim();
+
+    if(keyword === ""){
+        renderPlayers(players);
+        return;
+    }
+
+    const result = [];
+
+    players.forEach(player=>{
+
+        const matchedFlowers = player.flowers.filter(flower=>
+            flower.name.includes(keyword)
+        );
+
+        if(
+            player.id.includes(keyword)
+            || matchedFlowers.length > 0
+        ){
+            result.push({
+                id:player.id,
+                flowers:
+                    matchedFlowers.length > 0
+                    ? matchedFlowers
+                    : player.flowers
+            });
+        }
+
+    });
+
+    renderPlayers(result);
+
+}
+
+function resetSearch(){
+
+    document.getElementById("searchInput").value = "";
+    renderPlayers(players);
+
+}
+
+function addFlower(){
+
+    const playerId = document.getElementById("newPlayer").value.trim();
+    const flowerName = document.getElementById("newFlower").value.trim();
+    const rarity = document.getElementById("newRarity").value.trim();
+    const image = document.getElementById("newImage").value.trim();
+
+    if(!playerId || !flowerName || !rarity){
+        alert("请填写完整信息");
+        return;
+    }
+
+    let player = players.find(p=>p.id === playerId);
+
+    if(!player){
+        player = {
+            id:playerId,
+            flowers:[]
+        };
+        players.push(player);
+    }
+
+    player.flowers.push({
+        name:flowerName,
+        rarity:rarity,
+        image:image || "https://via.placeholder.com/300x300?text=Flower"
+    });
+
+    renderPlayers(players);
+
+    document.getElementById("newPlayer").value = "";
+    document.getElementById("newFlower").value = "";
+    document.getElementById("newRarity").value = "";
+    document.getElementById("newImage").value = "";
+
+    alert("添加成功！");
+
+}
+
+renderPlayers(players);
+
+</script>
+
+</body>
+</html>
