@@ -121,18 +121,30 @@ def push_serverchan(message):
         print(message)
         raise SystemExit("Missing SERVERCHAN_SEND_URL secret.")
 
-    payload = json.dumps(
-        {"title": f"{GAME_NAME}限时码", "desp": message},
-        ensure_ascii=False,
-    ).encode("utf-8")
+    data = urllib.parse.urlencode({
+        "title": f"{GAME_NAME}限时码",
+        "desp": message,
+    }).encode("utf-8")
+
     req = urllib.request.Request(
         SERVERCHAN_SEND_URL,
-        data=payload,
+        data=data,
         method="POST",
-        headers={"Content-Type": "application/json; charset=utf-8"},
+        headers={
+            "Content-Type": "application/x-www-form-urlencoded; charset=utf-8",
+            "User-Agent": "Mozilla/5.0",
+            "Accept": "application/json,text/plain,*/*",
+        },
     )
-    with urllib.request.urlopen(req, timeout=20) as resp:
-        body = resp.read().decode("utf-8", errors="replace")
+
+    try:
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            body = resp.read().decode("utf-8", errors="replace")
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")
+        print(body)
+        raise
+
     print(body)
 
 
