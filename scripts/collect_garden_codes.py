@@ -121,7 +121,7 @@ def format_message(date_text, codes, sources):
 
 
 def push_serverchan(message):
-    if not SERVERCHAN_SEND_URL:
+    if not SERVERCHAN_SEND_URLS:
         print(message)
         raise SystemExit("Missing SERVERCHAN_SEND_URL secret.")
 
@@ -130,26 +130,29 @@ def push_serverchan(message):
         "desp": message,
     }).encode("utf-8")
 
-    req = urllib.request.Request(
-        SERVERCHAN_SEND_URL,
-        data=data,
-        method="POST",
-        headers={
-            "Content-Type": "application/x-www-form-urlencoded; charset=utf-8",
-            "User-Agent": "Mozilla/5.0",
-            "Accept": "application/json,text/plain,*/*",
-        },
-    )
+    for index, url in enumerate(SERVERCHAN_SEND_URLS, start=1):
+        req = urllib.request.Request(
+            url,
+            data=data,
+            method="POST",
+            headers={
+                "Content-Type": "application/x-www-form-urlencoded; charset=utf-8",
+                "User-Agent": "Mozilla/5.0",
+                "Accept": "application/json,text/plain,*/*",
+            },
+        )
 
-    try:
-        with urllib.request.urlopen(req, timeout=20) as resp:
-            body = resp.read().decode("utf-8", errors="replace")
-    except urllib.error.HTTPError as exc:
-        body = exc.read().decode("utf-8", errors="replace")
+        try:
+            with urllib.request.urlopen(req, timeout=20) as resp:
+                body = resp.read().decode("utf-8", errors="replace")
+        except urllib.error.HTTPError as exc:
+            body = exc.read().decode("utf-8", errors="replace")
+            print(f"ServerChan #{index} failed:")
+            print(body)
+            raise
+
+        print(f"ServerChan #{index} response:")
         print(body)
-        raise
-
-    print(body)
 
 
 if __name__ == "__main__":
