@@ -1,0 +1,22 @@
+name: Garden Codes
+
+on:
+  schedule:
+    # GitHub cron is UTC. 12:05 UTC is 20:05 in Asia/Shanghai.
+    - cron: "5 12 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  collect-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Collect codes and push to ServerChan
+        env:
+          SERVERCHAN_SEND_URL: ${{ secrets.SERVERCHAN_SEND_URL }}
+        run: python scripts/collect_garden_codes.py
