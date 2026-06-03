@@ -9,7 +9,11 @@ import urllib.request
 
 
 GAME_NAME = "我的花园世界"
-SERVERCHAN_SEND_URL = os.environ.get("SERVERCHAN_SEND_URL", "").strip()
+SERVERCHAN_SEND_URLS = [
+    os.environ.get("SERVERCHAN_SEND_URL", "").strip(),
+    os.environ.get("SERVERCHAN_SEND_URL_2", "").strip(),
+]
+SERVERCHAN_SEND_URLS = [url for url in SERVERCHAN_SEND_URLS if url]
 
 
 def fetch(url, timeout=20):
