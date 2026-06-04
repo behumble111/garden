@@ -2,8 +2,8 @@ name: Garden Codes
 
 on:
   schedule:
-    # GitHub cron is UTC. 12:05 UTC is 20:05 in Asia/Shanghai.
-    - cron: "5 12 * * *"
+    # Temporary test: 13:00 UTC is 21:00 in Asia/Shanghai.
+    - cron: "0 13 * * *"
   workflow_dispatch:
 
 permissions:
@@ -19,4 +19,5 @@ jobs:
       - name: Collect codes and push to ServerChan
         env:
           SERVERCHAN_SEND_URL: ${{ secrets.SERVERCHAN_SEND_URL }}
+          SERVERCHAN_SEND_URL_2: ${{ secrets.SERVERCHAN_SEND_URL_2 }}
         run: python scripts/collect_garden_codes.py
