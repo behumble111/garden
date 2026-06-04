@@ -2,12 +2,12 @@ name: Garden Codes
 
 on:
   schedule:
-    # Temporary test: 13:00 UTC is 21:00 in Asia/Shanghai.
-    - cron: "0 13 * * *"
+    # Beijing 20:00/20:05/20:10, 21:00/21:05/21:10, 22:00/22:05/22:10.
+    - cron: "0,5,10 12,13,14 * * *"
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   collect-and-push:
@@ -21,3 +21,15 @@ jobs:
           SERVERCHAN_SEND_URL: ${{ secrets.SERVERCHAN_SEND_URL }}
           SERVERCHAN_SEND_URL_2: ${{ secrets.SERVERCHAN_SEND_URL_2 }}
         run: python scripts/collect_garden_codes.py
+
+      - name: Persist sent state
+        run: |
+          if [ -n "$(git status --porcelain .github/state/garden-sent.json)" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add .github/state/garden-sent.json
+            git commit -m "Update garden push state"
+            git push
+          else
+            echo "No sent state change."
+          fi
