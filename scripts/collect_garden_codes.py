@@ -19,32 +19,23 @@ SERVERCHAN_SEND_URLS = [
 SERVERCHAN_SEND_URLS = [url for url in SERVERCHAN_SEND_URLS if url]
 
 BLOGGERS = [
-    {"platform": "小红书", "name": "我的花园世界-金兰叶序", "red_id": "26453463813", "kind": "通码"},
-    {"platform": "小红书", "name": "喵喵嗷呜", "red_id": "4278304669", "kind": "限时码"},
+    {"platform": "小红书", "name": "我的花园世界-金兰叶序", "red_id": "26453463813", "focus": "今日通码"},
+    {"platform": "小红书", "name": "喵喵嗷呜", "red_id": "4278304669", "focus": "兑换码"},
 ]
 
-SLOTS = {
-    "20": {"hour": 20, "label": "20点推送", "targets": ["7点今日通码", "8点限时码"]},
-    "21": {"hour": 21, "label": "21点推送", "targets": ["9点限时码"]},
-    "22": {"hour": 22, "label": "22点推送", "targets": ["10点限时码"]},
-}
+TARGETS = [
+    {"id": "daily", "label": "今日通码", "keywords": ["今日通码", "通码", "今天通码"], "hour": 19, "minute": 0},
+    {"id": "20", "label": "8点兑换码", "keywords": ["8点兑换码", "八点兑换码", "8点限时码", "八点限时码"], "hour": 20, "minute": 6},
+    {"id": "21", "label": "9点兑换码", "keywords": ["9点兑换码", "九点兑换码", "9点限时码", "九点限时码"], "hour": 21, "minute": 25},
+    {"id": "22", "label": "10点兑换码", "keywords": ["10点兑换码", "十点兑换码", "10点限时码", "十点限时码"], "hour": 22, "minute": 25},
+]
 
 
 def now_bj():
     return dt.datetime.now(dt.timezone(dt.timedelta(hours=8)))
 
 
-def current_slot(now):
-    forced = os.environ.get("GARDEN_SLOT", "").strip()
-    if forced in SLOTS:
-        return forced, SLOTS[forced], True
-    for slot_id, slot in SLOTS.items():
-        if now.hour == slot["hour"] and now.minute in (0, 5, 10):
-            return slot_id, slot, now.minute == 10
-    return "", None, False
-
-
-def fetch(url, timeout=6):
+def fetch(url, timeout=4):
     req = urllib.request.Request(
         url,
         headers={
@@ -85,21 +76,6 @@ def search_bing_rss(query):
     return results
 
 
-def search_queries(slot, today):
-    queries = []
-    for target in slot["targets"]:
-        for blogger in BLOGGERS:
-            if target.endswith("通码") and blogger["kind"] != "通码":
-                continue
-            if target.endswith("限时码") and blogger["kind"] != "限时码":
-                continue
-            queries.append(f"{blogger['name']} {blogger['red_id']} {GAME_NAME} {today.month}月{today.day}日 {target}")
-            queries.append(f"site:xiaohongshu.com {blogger['name']} {GAME_NAME} {target}")
-        queries.append(f"{GAME_NAME} {today.month}月{today.day}日 {target} 小红书")
-        queries.append(f"{GAME_NAME} 今日 {target} 小红书")
-    return dedupe(queries)
-
-
 def dedupe(items):
     seen = set()
     output = []
@@ -110,7 +86,7 @@ def dedupe(items):
     return output
 
 
-def today_markers(today):
+def today_terms(today):
     return [
         today.strftime("%Y-%m-%d"),
         today.strftime("%Y/%m/%d"),
@@ -119,49 +95,88 @@ def today_markers(today):
         "今天",
         "今日",
         "今晚",
-        "刚刚",
-        "小时前",
-        "分钟前",
     ]
 
 
-def known_blogger(text):
+def queries_for_target(target, today):
+    queries = []
+    relevant_bloggers = BLOGGERS
+    if target["id"] == "daily":
+        relevant_bloggers = [b for b in BLOGGERS if b["focus"] == "今日通码"]
+    elif target["id"] in ("20", "21", "22"):
+        relevant_bloggers = [b for b in BLOGGERS if b["focus"] == "兑换码"]
+
+    for blogger in relevant_bloggers:
+        queries.append(f"{blogger['name']} {blogger['red_id']} {GAME_NAME} {today.month}月{today.day}日 {target['label']}")
+
+    queries.append(f"{GAME_NAME} {today.month}月{today.day}日 {target['label']} 小红书")
+
+    return dedupe(queries)
+
+
+def target_is_due(target, now):
+    release_time = now.replace(hour=target["hour"], minute=target["minute"], second=0, microsecond=0)
+    return now >= release_time
+
+
+def is_today_text(text, today):
+    return any(term in text for term in today_terms(today)) or any(term in text for term in ["刚刚", "分钟前", "小时前"])
+
+
+def source_name(text):
     for blogger in BLOGGERS:
         if blogger["name"] in text or blogger["red_id"] in text:
             return f"{blogger['platform']} {blogger['name']}({blogger['red_id']})"
-    return "同类型公开来源"
+    if "xiaohongshu.com" in text or "小红书" in text:
+        return "小红书同类型公开来源"
+    if "weibo.com" in text or "微博" in text:
+        return "微博同类型公开来源"
+    return "公开搜索来源"
 
 
-def relevant_to_slot(text, slot, today):
+def text_matches_target(text, target, today):
     if GAME_NAME not in text and "花园世界" not in text:
         return False
-    if not any(marker in text for marker in today_markers(today)):
+    if not is_today_text(text, today):
         return False
-    return any(target in text or target.replace("点", ":00") in text for target in slot["targets"])
+    return any(keyword in text for keyword in target["keywords"])
 
 
-def extract_codes(text, slot):
+def extract_codes(text, target):
     codes = []
-    for target in slot["targets"]:
-        code_words = ["通码"] if target.endswith("通码") else ["限时码"]
-        for word in code_words:
-            patterns = [
-                rf"{re.escape(target)}[：:\s]*([一-龥A-Za-z0-9_-]{{2,20}})",
-                rf"{word}[：:\s]*([一-龥A-Za-z0-9_-]{{2,20}})",
-            ]
-            for pattern in patterns:
-                for match in re.finditer(pattern, text):
-                    code = normalize_code(match.group(1))
-                    if code:
-                        codes.append({"target": target, "code": code})
-    return unique_codes(codes)
+    words = ["通码"] if target["id"] == "daily" else ["兑换码", "限时码"]
+    for keyword in target["keywords"] + words:
+        patterns = [
+            rf"{re.escape(keyword)}[：:\s]*([一-龥A-Za-z0-9_-]{{2,24}})",
+            rf"{re.escape(keyword)}.*?[：:\s]([一-龥A-Za-z0-9_-]{{2,24}})",
+        ]
+        for pattern in patterns:
+            for match in re.finditer(pattern, text):
+                code = normalize_code(match.group(1))
+                if code:
+                    codes.append(code)
+    return dedupe(codes)
 
 
 def normalize_code(candidate):
     candidate = candidate.strip(" ：:，,。.;；、[]【】（）()《》<>\"'“”‘’")
-    if not (2 <= len(candidate) <= 20):
+    if not (2 <= len(candidate) <= 24):
         return ""
-    noise = {"兑换", "复制", "领取", "攻略", "最新", "今日", "今天", "今晚", "通码", "限时码", "小红书"}
+    noise = {
+        "兑换",
+        "复制",
+        "领取",
+        "攻略",
+        "最新",
+        "今日",
+        "今天",
+        "今晚",
+        "通码",
+        "兑换码",
+        "限时码",
+        "小红书",
+        "我的花园世界",
+    }
     if candidate in noise:
         return ""
     if re.fullmatch(r"\d{1,2}([:.月-])\d{1,2}日?", candidate):
@@ -169,22 +184,10 @@ def normalize_code(candidate):
     return candidate
 
 
-def unique_codes(codes):
-    seen = set()
-    output = []
-    for item in codes:
-        key = (item["target"], item["code"])
-        if key not in seen:
-            seen.add(key)
-            output.append(item)
-    return output
-
-
-def collect(slot, today):
+def collect_target(target, today):
     found = []
-    sources = []
     seen_urls = set()
-    for query in search_queries(slot, today):
+    for query in queries_for_target(target, today):
         try:
             results = search_bing_rss(query)[:3]
         except Exception as exc:
@@ -195,24 +198,28 @@ def collect(slot, today):
                 continue
             seen_urls.add(result["url"])
             text = f"{result['title']} {result.get('text', '')} {result['url']}"
-            if not relevant_to_slot(text, slot, today):
+            if not text_matches_target(text, target, today):
                 continue
-            codes = extract_codes(text, slot)
-            source_name = known_blogger(text)
-            sources.append({"source": source_name, "title": result["title"], "url": result["url"], "codes": codes})
-            for item in codes:
-                item = dict(item)
-                item["source"] = source_name
-                item["url"] = result["url"]
-                found.append(item)
-    return unique_found(found), sources
+            codes = extract_codes(text, target)
+            for code in codes:
+                found.append(
+                    {
+                        "target_id": target["id"],
+                        "target": target["label"],
+                        "code": code,
+                        "source": source_name(text),
+                        "title": result["title"],
+                        "url": result["url"],
+                    }
+                )
+    return unique_found(found)
 
 
 def unique_found(found):
     seen = set()
     output = []
     for item in found:
-        key = (item["target"], item["code"], item["source"])
+        key = (item["target_id"], item["code"], item["source"])
         if key not in seen:
             seen.add(key)
             output.append(item)
@@ -233,27 +240,17 @@ def save_state(state):
         f.write("\n")
 
 
-def format_message(date_text, slot, found, sources, final_attempt):
-    lines = [f"{GAME_NAME}{slot['label']} {date_text}", f"本次目标：{'、'.join(slot['targets'])}"]
-    if found:
-        lines.append("")
-        lines.append("抓到的码：")
-        for item in found:
-            lines.append(f"- {item['target']}：{item['code']}")
-            lines.append(f"  来源：{item['source']}")
-    else:
-        lines.append("")
-        lines.append("没抓到。")
-        if final_attempt:
-            lines.append("这已经是本时间点延长 10 分钟后的结果。")
-        else:
-            lines.append("还在 10 分钟窗口内，5 分钟后会继续尝试。")
-
-    if sources:
-        lines.append("")
-        lines.append("参考来源：")
-        for item in sources[:8]:
-            lines.append(f"- {item['source']}：{item['title']} {item['url']}")
+def format_message(date_text, item):
+    lines = [
+        f"{GAME_NAME}{item['target']} {date_text}",
+        f"兑换码：{item['code']}",
+        f"来源：{item['source']}",
+    ]
+    if item.get("title"):
+        lines.append(f"标题：{item['title']}")
+    if item.get("url"):
+        lines.append(f"链接：{item['url']}")
+    lines.append("提示：兑换码可能很快过期，请尽快兑换。")
     return "\n".join(lines)
 
 
@@ -261,7 +258,7 @@ def push_serverchan(message):
     if not SERVERCHAN_SEND_URLS:
         print(message)
         raise SystemExit("Missing SERVERCHAN_SEND_URL secret.")
-    data = urllib.parse.urlencode({"title": f"{GAME_NAME}每日码推送", "desp": message}).encode("utf-8")
+    data = urllib.parse.urlencode({"title": f"{GAME_NAME}兑换码", "desp": message}).encode("utf-8")
     for index, url in enumerate(SERVERCHAN_SEND_URLS, start=1):
         req = urllib.request.Request(
             url,
@@ -287,28 +284,47 @@ def push_serverchan(message):
 
 def main():
     now = now_bj()
-    slot_id, slot, final_attempt = current_slot(now)
-    if not slot:
-        print(f"No active push window at {now.isoformat()}.")
-        return
-
-    date_text = now.date().strftime("%Y-%m-%d")
-    state_key = f"{date_text}-{slot_id}"
+    today = now.date()
+    date_text = today.strftime("%Y-%m-%d")
     state = load_state()
-    if state.get(state_key, {}).get("sent"):
-        print(f"{state_key} already sent; skipping duplicate.")
-        return
+    sent_any = False
 
-    found, sources = collect(slot, now.date())
-    if not found and not final_attempt:
-        print(format_message(date_text, slot, found, sources, final_attempt))
-        return
+    searches_used = 0
+    max_searches = int(os.environ.get("GARDEN_MAX_SEARCHES", "6"))
 
-    message = format_message(date_text, slot, found, sources, final_attempt)
-    print(message)
-    push_serverchan(message)
-    state[state_key] = {"sent": True, "sent_at": now.isoformat(), "found": bool(found)}
-    save_state(state)
+    for target in TARGETS:
+        if not target_is_due(target, now):
+            continue
+        state_key = f"{date_text}-{target['id']}"
+        if state.get(state_key, {}).get("sent"):
+            continue
+        if searches_used >= max_searches:
+            print("Search budget exhausted for this run.")
+            break
+        searches_used += len(queries_for_target(target, today))
+        found = collect_target(target, today)
+        if not found:
+            print(f"{target['label']} not found yet.")
+            continue
+
+        item = found[0]
+        message = format_message(date_text, item)
+        print(message)
+        push_serverchan(message)
+        state[state_key] = {
+            "sent": True,
+            "sent_at": now.isoformat(),
+            "target": target["label"],
+            "code": item["code"],
+            "source": item["source"],
+            "url": item["url"],
+        }
+        sent_any = True
+
+    if sent_any:
+        save_state(state)
+    else:
+        print("No new code found; no push sent.")
 
 
 if __name__ == "__main__":

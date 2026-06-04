@@ -2,12 +2,12 @@ name: Garden Codes
 
 on:
   schedule:
-    # Beijing 20:00/20:05/20:10, 21:00/21:05/21:10, 22:00/22:05/22:10.
-    - cron: "0,5,10 12,13,14 * * *"
+    # Poll every 5 minutes from Beijing 19:00 to 23:55.
+    - cron: "*/5 11-15 * * *"
   workflow_dispatch:
     inputs:
       slot:
-        description: "Manual test slot: 20, 21, or 22"
+        description: "Unused manual input kept for compatibility"
         required: false
         default: ""
 
