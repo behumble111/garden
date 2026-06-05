@@ -254,6 +254,25 @@ def format_message(date_text, item):
     return "\n".join(lines)
 
 
+def format_status_message(date_text, pending_targets, final_status):
+    lines = [f"{GAME_NAME}兑换码抓取状态 {date_text}"]
+    if pending_targets:
+        lines.append("")
+        lines.append("截至本次检查，还没抓到：")
+        for target in pending_targets:
+            lines.append(f"- {target['label']}")
+    else:
+        lines.append("")
+        lines.append("今天配置的码都已经发送过了。")
+    if final_status:
+        lines.append("")
+        lines.append("这是今天最后一次兜底检查。")
+    else:
+        lines.append("")
+        lines.append("后续会继续轮询，抓到会立刻推送。")
+    return "\n".join(lines)
+
+
 def push_serverchan(message):
     if not SERVERCHAN_SEND_URLS:
         print(message)
@@ -288,6 +307,7 @@ def main():
     date_text = today.strftime("%Y-%m-%d")
     state = load_state()
     sent_any = False
+    pending_targets = []
 
     searches_used = 0
     max_searches = int(os.environ.get("GARDEN_MAX_SEARCHES", "6"))
@@ -305,6 +325,7 @@ def main():
         found = collect_target(target, today)
         if not found:
             print(f"{target['label']} not found yet.")
+            pending_targets.append(target)
             continue
 
         item = found[0]
@@ -323,6 +344,10 @@ def main():
 
     if sent_any:
         save_state(state)
+    elif os.environ.get("GARDEN_FORCE_STATUS", "").lower() == "true" or (now.hour == 23 and now.minute >= 55):
+        message = format_status_message(date_text, pending_targets, now.hour == 23 and now.minute >= 55)
+        print(message)
+        push_serverchan(message)
     else:
         print("No new code found; no push sent.")
 

@@ -26,6 +26,7 @@ jobs:
           SERVERCHAN_SEND_URL: ${{ secrets.SERVERCHAN_SEND_URL }}
           SERVERCHAN_SEND_URL_2: ${{ secrets.SERVERCHAN_SEND_URL_2 }}
           GARDEN_SLOT: ${{ github.event.inputs.slot }}
+          GARDEN_FORCE_STATUS: ${{ github.event_name == 'workflow_dispatch' }}
         run: python scripts/collect_garden_codes.py
 
       - name: Persist sent state
