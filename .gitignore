@@ -1,0 +1,12 @@
+xhs_cookie.txt
+serverchan_urls.txt
+.garden_code_state.json
+logs/
+node_modules/
+tmp/
+__pycache__/
+scripts/__pycache__/
+xhs_login_state.pkl
+xhs_phone_login_state.pkl
+xhs_login_qr.png
+xhs_last_login_response.json

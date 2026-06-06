@@ -1,0 +1,112 @@
+name: Garden XHS Cloud Codes
+
+on:
+  schedule:
+    # Beijing time 20:20/20:25/20:30, 21:20/21:25/21:30, 22:20/22:25/22:30.
+    - cron: "20,25,30 12-14 * * *"
+  workflow_dispatch:
+    inputs:
+      slot:
+        description: "Slot hour: 20, 21, or 22"
+        required: true
+        default: "20"
+      attempt:
+        description: "Attempt: 1, 2, or 3"
+        required: true
+        default: "1"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: garden-xhs-cloud
+  cancel-in-progress: false
+
+jobs:
+  collect-and-push:
+    runs-on: ubuntu-latest
+    env:
+      TZ: Asia/Shanghai
+      PYTHONUTF8: "1"
+      XHS_COOKIE: ${{ secrets.XHS_COOKIE }}
+      SERVERCHAN_SEND_URL: ${{ secrets.SERVERCHAN_SEND_URL }}
+      SERVERCHAN_SEND_URL_2: ${{ secrets.SERVERCHAN_SEND_URL_2 }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve slot and attempt
+        id: slot
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            slot="${{ inputs.slot }}"
+            attempt="${{ inputs.attempt }}"
+          else
+            hm="$(date +%H:%M)"
+            case "$hm" in
+              20:20) slot=20; attempt=1 ;;
+              20:25) slot=20; attempt=2 ;;
+              20:30) slot=20; attempt=3 ;;
+              21:20) slot=21; attempt=1 ;;
+              21:25) slot=21; attempt=2 ;;
+              21:30) slot=21; attempt=3 ;;
+              22:20) slot=22; attempt=1 ;;
+              22:25) slot=22; attempt=2 ;;
+              22:30) slot=22; attempt=3 ;;
+              *) echo "Unexpected Beijing time: $hm"; exit 1 ;;
+            esac
+          fi
+          echo "slot=$slot" >> "$GITHUB_OUTPUT"
+          echo "attempt=$attempt" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Cache aione upstreams
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/share/aione
+          key: aione-upstreams-v1
+
+      - name: Install aione
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install all-in-one-aione
+          aione setup
+
+      - name: Save XHS cookie
+        shell: bash
+        run: |
+          if [[ -z "$XHS_COOKIE" ]]; then
+            echo "Missing XHS_COOKIE secret"
+            exit 1
+          fi
+          aione auth xhs set-cookie --profile pc --cookie "$XHS_COOKIE"
+
+      - name: Collect and push
+        shell: bash
+        run: |
+          python scripts/push_xhs_garden_codes.py \
+            --slot "${{ steps.slot.outputs.slot }}" \
+            --attempt "${{ steps.slot.outputs.attempt }}"
+
+      - name: Commit sent state
+        shell: bash
+        run: |
+          if [[ -n "$(git status --short .garden_code_state.json)" ]]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add .garden_code_state.json
+            git commit -m "Update garden code sent state"
+            git pull --rebase
+            git push
+          else
+            echo "No sent state changes."
+          fi
