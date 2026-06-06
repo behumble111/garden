@@ -1,0 +1,62 @@
+name: Garden Cloud Push Test
+
+"on":
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  delay-and-send:
+    if: contains(github.event.head_commit.message, 'Run cloud shutdown test')
+    runs-on: ubuntu-latest
+    env:
+      SERVERCHAN_SEND_URL: ${{ secrets.SERVERCHAN_SEND_URL }}
+      SERVERCHAN_SEND_URL_2: ${{ secrets.SERVERCHAN_SEND_URL_2 }}
+    steps:
+      - name: Wait for shutdown test
+        run: sleep 720
+
+      - name: Send fixed code test
+        run: |
+          python - <<'PY'
+          import os
+          import urllib.parse
+          import urllib.request
+
+          urls = [
+              os.environ.get("SERVERCHAN_SEND_URL", "").strip(),
+              os.environ.get("SERVERCHAN_SEND_URL_2", "").strip(),
+          ]
+          urls = [url for url in urls if url]
+          if not urls:
+              raise SystemExit("Missing ServerChan URL secrets")
+
+          message = (
+              "\u4e91\u7aef\u5ef6\u8fdf\u6d4b\u8bd5\uff1a"
+              "\u6211\u7684\u82b1\u56ed\u4e16\u754c 6.6\u53f7 20\u70b9\u9650\u65f6\u7801\\n\\n"
+              "- 20\u70b9\u9650\u65f6\u7801\uff1a\u98ce\u4fe1\u5b50\u9999\u601d\u5ff5\u4e5f\u9999\\n"
+              "- \u6765\u6e90\uff1a\u8349\u8393\u718a\u5d3d\u300a6.6\u53f7\u6211\u7684\u82b1\u56ed\u4e16\u754c\u5151\u6362\u7801\u300b\\n\\n"
+              "\u8fd9\u6761\u6d88\u606f\u7531 GitHub Actions \u4e91\u7aef\u53d1\u9001\u3002"
+              "\u5982\u679c\u4f60\u5df2\u7ecf\u5173\u95ed\u7535\u8111\u4f46\u4ecd\u6536\u5230\uff0c\u8bf4\u660e\u4e91\u7aef\u65b9\u6848\u53ef\u884c\u3002"
+          )
+          data = urllib.parse.urlencode({
+              "title": "\u6211\u7684\u82b1\u56ed\u4e16\u754c\u4e91\u7aef\u6d4b\u8bd5",
+              "desp": message,
+          }).encode("utf-8")
+
+          for index, url in enumerate(urls, start=1):
+              req = urllib.request.Request(
+                  url,
+                  data=data,
+                  method="POST",
+                  headers={
+                      "Content-Type": "application/x-www-form-urlencoded; charset=utf-8",
+                      "User-Agent": "Mozilla/5.0",
+                  },
+              )
+              with urllib.request.urlopen(req, timeout=20) as resp:
+                  print(f"ServerChan #{index}: {resp.read().decode('utf-8', errors='replace')}")
+          PY
