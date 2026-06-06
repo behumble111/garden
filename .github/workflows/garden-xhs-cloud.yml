@@ -14,6 +14,14 @@ on:
         description: "Attempt: 1, 2, or 3"
         required: true
         default: "1"
+      dry_run:
+        description: "Manual test only: true avoids pushing and state commits"
+        required: true
+        default: "true"
+      cloud_delay_test:
+        description: "Manual test: wait 12 minutes then send fixed 6.6 20:00 code"
+        required: true
+        default: "false"
 
 permissions:
   contents: write
@@ -38,7 +46,50 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Cloud delay test
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.cloud_delay_test == 'true' }}
+        shell: python
+        run: |
+          import os
+          import time
+          import urllib.parse
+          import urllib.request
+
+          time.sleep(720)
+          urls = [
+              os.environ.get("SERVERCHAN_SEND_URL", "").strip(),
+              os.environ.get("SERVERCHAN_SEND_URL_2", "").strip(),
+          ]
+          urls = [url for url in urls if url]
+          if not urls:
+              raise SystemExit("Missing ServerChan URL secrets")
+
+          message = """云端延迟测试：我的花园世界 6.6号 20点限时码
+
+- 20点限时码：风信子香思念也香
+- 来源：草莓熊崽《6.6号我的花园世界兑换码》
+
+这条消息由 GitHub Actions 云端发送。如果你已经关闭电脑但仍收到，说明云端方案可行。"""
+          data = urllib.parse.urlencode({
+              "title": "我的花园世界云端测试",
+              "desp": message,
+          }).encode("utf-8")
+
+          for index, url in enumerate(urls, start=1):
+              req = urllib.request.Request(
+                  url,
+                  data=data,
+                  method="POST",
+                  headers={
+                      "Content-Type": "application/x-www-form-urlencoded; charset=utf-8",
+                      "User-Agent": "Mozilla/5.0",
+                  },
+              )
+              with urllib.request.urlopen(req, timeout=20) as resp:
+                  print(f"ServerChan #{index}: {resp.read().decode('utf-8', errors='replace')}")
+
       - name: Resolve slot and attempt
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.cloud_delay_test != 'true' }}
         id: slot
         shell: bash
         run: |
@@ -64,17 +115,20 @@ jobs:
           echo "attempt=$attempt" >> "$GITHUB_OUTPUT"
 
       - name: Set up Python
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.cloud_delay_test != 'true' }}
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
       - name: Cache aione upstreams
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.cloud_delay_test != 'true' }}
         uses: actions/cache@v4
         with:
           path: ~/.local/share/aione
           key: aione-upstreams-v1
 
       - name: Install aione
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.cloud_delay_test != 'true' }}
         shell: bash
         run: |
           python -m pip install --upgrade pip
@@ -82,6 +136,7 @@ jobs:
           aione setup
 
       - name: Save XHS cookie
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.cloud_delay_test != 'true' }}
         shell: bash
         run: |
           if [[ -z "$XHS_COOKIE" ]]; then
@@ -91,13 +146,20 @@ jobs:
           aione auth xhs set-cookie --profile pc --cookie "$XHS_COOKIE"
 
       - name: Collect and push
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.cloud_delay_test != 'true' }}
         shell: bash
         run: |
+          extra_args=()
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ inputs.dry_run }}" == "true" ]]; then
+            extra_args+=(--dry-run)
+          fi
           python scripts/push_xhs_garden_codes.py \
             --slot "${{ steps.slot.outputs.slot }}" \
-            --attempt "${{ steps.slot.outputs.attempt }}"
+            --attempt "${{ steps.slot.outputs.attempt }}" \
+            "${extra_args[@]}"
 
       - name: Commit sent state
+        if: ${{ (github.event_name != 'workflow_dispatch' || inputs.dry_run != 'true') && (github.event_name != 'workflow_dispatch' || inputs.cloud_delay_test != 'true') }}
         shell: bash
         run: |
           if [[ -n "$(git status --short .garden_code_state.json)" ]]; then
