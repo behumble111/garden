@@ -1,0 +1,56 @@
+name: Garden Cloud Delay Test
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  delay-and-send:
+    runs-on: ubuntu-latest
+    env:
+      SERVERCHAN_SEND_URL: ${{ secrets.SERVERCHAN_SEND_URL }}
+      SERVERCHAN_SEND_URL_2: ${{ secrets.SERVERCHAN_SEND_URL_2 }}
+    steps:
+      - name: Wait for shutdown test
+        run: sleep 720
+
+      - name: Send 6.6 20:00 code test
+        shell: python
+        run: |
+          import os
+          import urllib.parse
+          import urllib.request
+
+          urls = [
+              os.environ.get("SERVERCHAN_SEND_URL", "").strip(),
+              os.environ.get("SERVERCHAN_SEND_URL_2", "").strip(),
+          ]
+          urls = [url for url in urls if url]
+          if not urls:
+              raise SystemExit("Missing ServerChan URL secrets")
+
+          message = """????????????? 6.6? 20????
+
+- 20?????????????
+- ????????6.6???????????
+
+????? GitHub Actions ????????????????????????????"""
+          data = urllib.parse.urlencode({
+              "title": "??????????",
+              "desp": message,
+          }).encode("utf-8")
+
+          for index, url in enumerate(urls, start=1):
+              req = urllib.request.Request(
+                  url,
+                  data=data,
+                  method="POST",
+                  headers={
+                      "Content-Type": "application/x-www-form-urlencoded; charset=utf-8",
+                      "User-Agent": "Mozilla/5.0",
+                  },
+              )
+              with urllib.request.urlopen(req, timeout=20) as resp:
+                  print(f"ServerChan #{index}: {resp.read().decode('utf-8', errors='replace')}")
