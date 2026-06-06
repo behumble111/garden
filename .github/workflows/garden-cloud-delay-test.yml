@@ -1,6 +1,6 @@
 name: Garden Cloud Delay Test
 
-on:
+"on":
   workflow_dispatch:
 
 permissions:
