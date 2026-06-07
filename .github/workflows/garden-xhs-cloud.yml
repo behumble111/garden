@@ -46,18 +46,21 @@ jobs:
             slot="${{ inputs.slot }}"
             attempt="${{ inputs.attempt }}"
           else
-            hm="$(date +%H:%M)"
-            case "$hm" in
-              20:20) slot=20; attempt=1 ;;
-              20:25) slot=20; attempt=2 ;;
-              20:30) slot=20; attempt=3 ;;
-              21:20) slot=21; attempt=1 ;;
-              21:25) slot=21; attempt=2 ;;
-              21:30) slot=21; attempt=3 ;;
-              22:20) slot=22; attempt=1 ;;
-              22:25) slot=22; attempt=2 ;;
-              22:30) slot=22; attempt=3 ;;
-              *) echo "Unexpected Beijing time: $hm"; exit 1 ;;
+            hour="$(date +%H)"
+            minute="$(date +%M)"
+            case "$hour" in
+              20|21|22) slot="$hour" ;;
+              *) echo "Unexpected Beijing hour: $hour:$minute"; exit 1 ;;
+            esac
+            if (( 10#$minute >= 20 && 10#$minute < 25 )); then
+              attempt=1
+            elif (( 10#$minute >= 25 && 10#$minute < 30 )); then
+              attempt=2
+            elif (( 10#$minute >= 30 && 10#$minute < 60 )); then
+              attempt=3
+            else
+              echo "Unexpected Beijing minute: $hour:$minute"
+              exit 1
             esac
           fi
           echo "slot=$slot" >> "$GITHUB_OUTPUT"
