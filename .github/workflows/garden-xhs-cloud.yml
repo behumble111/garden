@@ -22,6 +22,10 @@ on:
         description: "Attempt: 1, 2, or 3"
         required: true
         default: "1"
+      dry_run:
+        description: "Manual test only: true avoids pushing and state commits"
+        required: true
+        default: "true"
 
 permissions:
   contents: write
@@ -36,6 +40,7 @@ jobs:
     env:
       TZ: Asia/Shanghai
       PYTHONUTF8: "1"
+      PYTHONIOENCODING: "utf-8"
       XHS_COOKIE: ${{ secrets.XHS_COOKIE }}
       SERVERCHAN_SEND_URL: ${{ secrets.SERVERCHAN_SEND_URL }}
       SERVERCHAN_SEND_URL_2: ${{ secrets.SERVERCHAN_SEND_URL_2 }}
@@ -100,11 +105,17 @@ jobs:
       - name: Collect and push
         shell: bash
         run: |
+          extra_args=()
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ inputs.dry_run }}" == "true" ]]; then
+            extra_args+=(--dry-run)
+          fi
           python scripts/push_xhs_garden_codes.py \
             --slot "${{ steps.slot.outputs.slot }}" \
-            --attempt "${{ steps.slot.outputs.attempt }}"
+            --attempt "${{ steps.slot.outputs.attempt }}" \
+            "${extra_args[@]}"
 
       - name: Commit sent state
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.dry_run != 'true' }}
         shell: bash
         run: |
           if [[ -n "$(git status --short .garden_code_state.json)" ]]; then
