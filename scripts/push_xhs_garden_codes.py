@@ -93,6 +93,7 @@ def find_xhs_upstream():
 
 XHS_UPSTREAM = find_xhs_upstream()
 NODE_BIN = Path.home() / ".cache" / "codex-runtimes" / "codex-primary-runtime" / "dependencies" / "node" / "bin"
+AUTH_FAILED = False
 
 
 def load_state():
@@ -318,6 +319,7 @@ def relevant_search_result(item):
 
 
 def collect_from_xhs(slot, today):
+    global AUTH_FAILED
     seen = set()
     details = []
     candidates = []
@@ -327,6 +329,8 @@ def collect_from_xhs(slot, today):
         try:
             items = xhs_search(query)
         except Exception as exc:
+            if any(marker in str(exc) for marker in ["登录已过期", "login", "cookie", "Cookie", "unauthorized"]):
+                AUTH_FAILED = True
             print(f"Search failed: {query}: {exc}", file=sys.stderr)
             continue
 
@@ -472,6 +476,20 @@ def build_message(slot, attempt, today, codes, sources, state):
     return "\n".join(lines)
 
 
+def build_auth_failed_message(today):
+    return "\n".join(
+        [
+            f"{GAME_NAME}官服/微信版本兑换码 {today.isoformat()}",
+            "",
+            "小红书登录已过期，无法搜索兑换码。",
+            "",
+            "请更新 GitHub Secret 里的 XHS_COOKIE；如果本地也要继续抓取，也需要更新本地 xhs_cookie.txt 或 aione 的小红书 cookie。",
+            "",
+            "这不是“未抓到兑换码”，而是搜索权限失效。",
+        ]
+    )
+
+
 def should_send(slot, attempt, codes):
     target = SLOT_CONFIG[slot]["target"]
     if slot == "20":
@@ -483,6 +501,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--slot", choices=["20", "21", "22"], required=True)
     parser.add_argument("--attempt", type=int, choices=[1, 2, 3], required=True)
+    parser.add_argument("--date", help="Beijing date to search, YYYY-MM-DD. Defaults to today's Beijing date.")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--test-message", action="store_true")
     args = parser.parse_args()
@@ -495,7 +514,7 @@ def main():
         return
 
     now = beijing_now()
-    today = now.date()
+    today = dt.date.fromisoformat(args.date) if args.date else now.date()
     state = load_state()
     slot_key = f"{today.isoformat()}-{args.slot}"
     if not args.dry_run and state.get("sent_slots", {}).get(slot_key):
@@ -504,6 +523,23 @@ def main():
 
     codes, sources, details = collect_from_xhs(args.slot, today)
     print(json.dumps({"codes": codes, "details_found": len(details)}, ensure_ascii=False, indent=2))
+
+    if AUTH_FAILED and not codes:
+        alert_key = f"{today.isoformat()}-xhs-auth-failed"
+        if not args.dry_run and state.get("sent_slots", {}).get(alert_key):
+            print(f"Already sent {alert_key}; skip.")
+            return
+        message = build_auth_failed_message(today)
+        title = f"{GAME_NAME}小红书登录已过期"
+        if args.dry_run:
+            print("DRY_RUN_MESSAGE_BEGIN")
+            print(message)
+            print("DRY_RUN_MESSAGE_END")
+            return
+        push_serverchan(title, message)
+        state.setdefault("sent_slots", {})[alert_key] = {"sent_at": now.isoformat(), "codes": {}}
+        save_state(state)
+        return
 
     if not should_send(args.slot, args.attempt, codes):
         print("Not enough codes yet; skip push until next attempt.")
