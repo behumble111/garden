@@ -286,15 +286,21 @@ def build_queries(today, slot):
     config = SLOT_CONFIG[slot]
     base = [
         f"{GAME_NAME} 官服 {md}兑换码",
+        f"{GAME_NAME} {md}兑换码",
         f"{GAME_NAME} 微信 {md2}兑换码",
         f"{GAME_NAME} 微信小游戏 {md2}兑换码",
+        f"{GAME_NAME} {md2}兑换码",
         f"{GAME_NAME} 官服 今日通码",
         f"{GAME_NAME} 微信 今日通用码",
+        f"{GAME_NAME} 今日通码",
         f"{GAME_NAME} 官服 {config['label']}",
+        f"{GAME_NAME} {config['label']}",
     ]
     base.extend(f"{creator} {GAME_NAME} 官服 兑换码" for creator in KNOWN_CREATORS)
+    base.extend(f"{creator} {GAME_NAME} 兑换码" for creator in KNOWN_CREATORS)
     base.extend(f"{GAME_NAME} 官服 {kw}" for kw in config["keywords"])
     base.extend(f"{GAME_NAME} 微信 {kw}" for kw in config["keywords"])
+    base.extend(f"{GAME_NAME} {kw}" for kw in config["keywords"])
     return list(dict.fromkeys(base))
 
 
@@ -333,6 +339,20 @@ def collect_from_xhs(slot, today):
                 AUTH_FAILED = True
             print(f"Search failed: {query}: {exc}", file=sys.stderr)
             continue
+        print(f"Search returned {len(items)} items: {query}", file=sys.stderr)
+        if items:
+            samples = []
+            for sample in items[:3]:
+                card = sample.get("note_card") or {}
+                user = card.get("user") or {}
+                samples.append(
+                    {
+                        "title": card.get("display_title") or card.get("title") or "",
+                        "author": user.get("nickname") or user.get("nick_name") or "",
+                        "type": sample.get("model_type"),
+                    }
+                )
+            print(json.dumps({"samples": samples}, ensure_ascii=False), file=sys.stderr)
 
         for item in items:
             if item.get("model_type") != "note":
