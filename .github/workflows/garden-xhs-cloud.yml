@@ -2,26 +2,23 @@ name: Garden XHS Cloud Codes
 
 on:
   schedule:
-    # Beijing time 20:20/20:25/20:30, 21:20/21:25/21:30, 22:20/22:25/22:30.
-    - cron: "20 12 * * *"
-    - cron: "25 12 * * *"
-    - cron: "30 12 * * *"
-    - cron: "20 13 * * *"
-    - cron: "25 13 * * *"
-    - cron: "30 13 * * *"
-    - cron: "20 14 * * *"
-    - cron: "25 14 * * *"
-    - cron: "30 14 * * *"
+    # Start once at Beijing 20:15, then the job waits locally for 20:20/20:25/20:30,
+    # 21:20/21:25/21:30, and 22:20/22:25/22:30.
+    - cron: "15 12 * * *"
   workflow_dispatch:
     inputs:
       slot:
-        description: "Slot hour: 20, 21, or 22"
+        description: "Manual test slot hour: 20, 21, or 22"
         required: true
         default: "20"
       attempt:
-        description: "Attempt: 1, 2, or 3"
+        description: "Manual test attempt: 1, 2, or 3"
         required: true
         default: "1"
+      date:
+        description: "Manual test Beijing date, YYYY-MM-DD. Empty means today."
+        required: false
+        default: ""
       dry_run:
         description: "Manual test only: true avoids pushing and state commits"
         required: true
@@ -37,6 +34,7 @@ concurrency:
 jobs:
   collect-and-push:
     runs-on: ubuntu-latest
+    timeout-minutes: 180
     env:
       TZ: Asia/Shanghai
       PYTHONUTF8: "1"
@@ -50,30 +48,6 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
-      - name: Resolve slot and attempt
-        id: slot
-        shell: bash
-        run: |
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            slot="${{ inputs.slot }}"
-            attempt="${{ inputs.attempt }}"
-          else
-            case "${{ github.event.schedule }}" in
-              "20 12 * * *") slot=20; attempt=1 ;;
-              "25 12 * * *") slot=20; attempt=2 ;;
-              "30 12 * * *") slot=20; attempt=3 ;;
-              "20 13 * * *") slot=21; attempt=1 ;;
-              "25 13 * * *") slot=21; attempt=2 ;;
-              "30 13 * * *") slot=21; attempt=3 ;;
-              "20 14 * * *") slot=22; attempt=1 ;;
-              "25 14 * * *") slot=22; attempt=2 ;;
-              "30 14 * * *") slot=22; attempt=3 ;;
-              *) echo "Unexpected schedule: ${{ github.event.schedule }}"; exit 1 ;;
-            esac
-          fi
-          echo "slot=$slot" >> "$GITHUB_OUTPUT"
-          echo "attempt=$attempt" >> "$GITHUB_OUTPUT"
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -105,14 +79,66 @@ jobs:
       - name: Collect and push
         shell: bash
         run: |
-          extra_args=()
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ inputs.dry_run }}" == "true" ]]; then
-            extra_args+=(--dry-run)
+          set -euo pipefail
+
+          run_one() {
+            local slot="$1"
+            local attempt="$2"
+            local date_arg="$3"
+            shift 3
+            python scripts/push_xhs_garden_codes.py \
+              --slot "$slot" \
+              --attempt "$attempt" \
+              --date "$date_arg" \
+              "$@"
+          }
+
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            extra_args=()
+            if [[ "${{ inputs.dry_run }}" == "true" ]]; then
+              extra_args+=(--dry-run)
+            fi
+            date_arg="${{ inputs.date }}"
+            if [[ -z "$date_arg" ]]; then
+              date_arg="$(date +%F)"
+            fi
+            run_one "${{ inputs.slot }}" "${{ inputs.attempt }}" "$date_arg" "${extra_args[@]}"
+            exit 0
           fi
-          python scripts/push_xhs_garden_codes.py \
-            --slot "${{ steps.slot.outputs.slot }}" \
-            --attempt "${{ steps.slot.outputs.attempt }}" \
-            "${extra_args[@]}"
+
+          now_hm="$(date +%H%M)"
+          if (( 10#$now_hm >= 2330 || 10#$now_hm < 1900 )); then
+            echo "Scheduled run is stale at Beijing $(date '+%F %T'); skip push."
+            exit 0
+          fi
+
+          date_arg="$(date +%F)"
+          wait_until() {
+            local target="$1"
+            while true; do
+              local now epoch_target epoch_now sleep_seconds
+              now="$(date +%H:%M)"
+              epoch_now="$(date +%s)"
+              epoch_target="$(date -d "$(date +%F) $target:00" +%s)"
+              sleep_seconds=$(( epoch_target - epoch_now ))
+              if (( sleep_seconds <= 0 )); then
+                echo "Running target $target at Beijing $(date '+%F %T')"
+                return
+              fi
+              echo "Waiting ${sleep_seconds}s for Beijing $target; now $now"
+              sleep "$sleep_seconds"
+            done
+          }
+
+          wait_until "20:20"; run_one 20 1 "$date_arg"
+          wait_until "20:25"; run_one 20 2 "$date_arg"
+          wait_until "20:30"; run_one 20 3 "$date_arg"
+          wait_until "21:20"; run_one 21 1 "$date_arg"
+          wait_until "21:25"; run_one 21 2 "$date_arg"
+          wait_until "21:30"; run_one 21 3 "$date_arg"
+          wait_until "22:20"; run_one 22 1 "$date_arg"
+          wait_until "22:25"; run_one 22 2 "$date_arg"
+          wait_until "22:30"; run_one 22 3 "$date_arg"
 
       - name: Commit sent state
         if: ${{ github.event_name != 'workflow_dispatch' || inputs.dry_run != 'true' }}
