@@ -55,14 +55,14 @@ SLOT_CONFIG = {
     "21": {
         "label": "21点限时码",
         "target": "limited_21",
-        "keywords": ["21点兑换码", "9点兑换码", "九点兑换码", "限时码2", "21:25", "21点限时码"],
+        "keywords": ["21点兑换码", "9点兑换码", "九点兑换码", "限时码2", "21:10", "21点限时码"],
         "include_daily": False,
         "include_weekly": False,
     },
     "22": {
         "label": "22点限时码",
         "target": "limited_22",
-        "keywords": ["22点兑换码", "10点兑换码", "十点兑换码", "限时码3", "22:25", "22点限时码"],
+        "keywords": ["22点兑换码", "10点兑换码", "十点兑换码", "限时码3", "22:10", "22点限时码"],
         "include_daily": False,
         "include_weekly": False,
     },
@@ -183,6 +183,26 @@ def note_summary(item, url):
     }
 
 
+def xhs_time_to_beijing_date(value):
+    if value in (None, ""):
+        return None
+    try:
+        timestamp = float(value)
+    except (TypeError, ValueError):
+        return None
+    if timestamp > 10_000_000_000:
+        timestamp /= 1000
+    return dt.datetime.fromtimestamp(timestamp, dt.timezone(dt.timedelta(hours=8))).date()
+
+
+def note_is_today(summary, today):
+    dates = [
+        xhs_time_to_beijing_date(summary.get("time")),
+        xhs_time_to_beijing_date(summary.get("last_update_time")),
+    ]
+    return today in dates
+
+
 def clean_code(value):
     value = re.sub(r"\[[^\]]+R\]", "", value)
     value = re.sub(r"#.*$", "", value)
@@ -227,8 +247,8 @@ def extract_by_labels(desc):
         ("weekly", r"(?:周码|本周码|每周码)[^：:\n\r]{0,16}[：:\s]+([^\n\r]+)"),
         ("daily", r"(?:今日通码|今日通用|今日通用码|日码|通码|通用码)[^：:\n\r]{0,16}[：:\s]+([^\n\r]+)"),
         ("limited_20", r"(?:20点|20\s*[:：]\s*00|8点|八点|限时码\s*1|第一个限时码)[^：:\n\r]{0,20}[：:\s]+([^\n\r]+)"),
-        ("limited_21", r"(?:21点|21\s*[:：]\s*25|9点|九点|限时码\s*2|第二个限时码)[^：:\n\r]{0,20}[：:\s]+([^\n\r]+)"),
-        ("limited_22", r"(?:22点|22\s*[:：]\s*25|10点|十点|限时码\s*3|第三个限时码)[^：:\n\r]{0,20}[：:\s]+([^\n\r]+)"),
+        ("limited_21", r"(?:21点|21\s*[:：]\s*10|9点|九点|限时码\s*2|第二个限时码)[^：:\n\r]{0,20}[：:\s]+([^\n\r]+)"),
+        ("limited_22", r"(?:22点|22\s*[:：]\s*10|10点|十点|限时码\s*3|第三个限时码)[^：:\n\r]{0,20}[：:\s]+([^\n\r]+)"),
     ]
     for kind, pattern in patterns:
         match = re.search(pattern, desc, flags=re.I)
@@ -262,9 +282,9 @@ def infer_code_kind(line, slot):
         return "daily"
     if re.search(r"20点|20\s*[:：]\s*00|8点|八点|限时码\s*1|第一个", line):
         return "limited_20"
-    if re.search(r"21点|21\s*[:：]\s*25|9点|九点|限时码\s*2|第二个", line):
+    if re.search(r"21点|21\s*[:：]\s*10|9点|九点|限时码\s*2|第二个", line):
         return "limited_21"
-    if re.search(r"22点|22\s*[:：]\s*25|10点|十点|限时码\s*3|第三个", line):
+    if re.search(r"22点|22\s*[:：]\s*10|10点|十点|限时码\s*3|第三个", line):
         return "limited_22"
     if re.search(r"兑换码|限时码", line):
         return SLOT_CONFIG[slot]["target"]
@@ -324,6 +344,15 @@ def relevant_search_result(item):
     return GAME_NAME in text or "花园世界" in text or "兑换码" in text or "限时码" in text
 
 
+def slot_text_matches(text, slot):
+    patterns = {
+        "20": r"20点|20\s*[:：]\s*00|8点|八点|限时码\s*1|第一个限时码|限时码一",
+        "21": r"21点|21\s*[:：]\s*10|9点|九点|限时码\s*2|第二个限时码|限时码二",
+        "22": r"22点|22\s*[:：]\s*10|10点|十点|限时码\s*3|第三个限时码|限时码三",
+    }
+    return bool(re.search(patterns[slot], text, flags=re.I))
+
+
 def collect_from_xhs(slot, today):
     global AUTH_FAILED
     seen = set()
@@ -375,9 +404,19 @@ def collect_from_xhs(slot, today):
             full_text = f"{summary['title']} {summary['author']} {summary['desc']}"
             if is_excluded_source(full_text):
                 continue
+            if not note_is_today(summary, today):
+                print(f"Skip old note: {summary['author']} {summary['title']}", file=sys.stderr)
+                continue
+            if not slot_text_matches(full_text, slot):
+                print(f"Skip note without slot marker: {summary['author']} {summary['title']}", file=sys.stderr)
+                continue
 
             codes = extract_codes(summary["desc"], slot)
             if not codes:
+                continue
+            target = SLOT_CONFIG[slot]["target"]
+            if target not in codes:
+                print(f"Skip note without target slot code: {summary['author']} {summary['title']}", file=sys.stderr)
                 continue
 
             summary = {**summary, "codes": codes, "official_score": official_score(full_text)}
