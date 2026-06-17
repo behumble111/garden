@@ -544,6 +544,10 @@ def main():
     codes, sources, details = collect_from_xhs(args.slot, today)
     print(json.dumps({"codes": codes, "details_found": len(details)}, ensure_ascii=False, indent=2))
 
+    if os.environ.get("GARDEN_SKIP_EMPTY_PUSH") == "1" and not codes and not details and not AUTH_FAILED:
+        print("No XHS details found; skip empty cloud push.")
+        return
+
     if AUTH_FAILED and not codes:
         alert_key = f"{today.isoformat()}-xhs-auth-failed"
         if not args.dry_run and state.get("sent_slots", {}).get(alert_key):
