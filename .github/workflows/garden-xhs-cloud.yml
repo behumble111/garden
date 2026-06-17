@@ -2,9 +2,8 @@ name: Garden XHS Cloud Codes
 
 on:
   schedule:
-    # Start once at Beijing 20:15, then the job waits locally for 20:20/20:25/20:30,
-    # 21:20/21:25/21:30, and 22:20/22:25/22:30.
-    - cron: "15 12 * * *"
+    # Beijing 20:15-22:55. Runs outside active windows exit without pushing.
+    - cron: "*/5 12-14 * * *"
   workflow_dispatch:
     inputs:
       slot:
@@ -34,7 +33,7 @@ concurrency:
 jobs:
   collect-and-push:
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 30
     env:
       TZ: Asia/Shanghai
       PYTHONUTF8: "1"
@@ -106,39 +105,38 @@ jobs:
             exit 0
           fi
 
-          now_hm="$(date +%H%M)"
-          if (( 10#$now_hm >= 2330 || 10#$now_hm < 1900 )); then
-            echo "Scheduled run is stale at Beijing $(date '+%F %T'); skip push."
+          now_h="$(date +%H)"
+          now_m="$(date +%M)"
+          now_hm="${now_h}${now_m}"
+          date_arg="$(date +%F)"
+          slot=""
+          attempt=""
+
+          if (( 10#$now_hm >= 2020 && 10#$now_hm < 2025 )); then
+            slot=20; attempt=1
+          elif (( 10#$now_hm >= 2025 && 10#$now_hm < 2030 )); then
+            slot=20; attempt=2
+          elif (( 10#$now_hm >= 2030 && 10#$now_hm < 2035 )); then
+            slot=20; attempt=3
+          elif (( 10#$now_hm >= 2120 && 10#$now_hm < 2125 )); then
+            slot=21; attempt=1
+          elif (( 10#$now_hm >= 2125 && 10#$now_hm < 2130 )); then
+            slot=21; attempt=2
+          elif (( 10#$now_hm >= 2130 && 10#$now_hm < 2135 )); then
+            slot=21; attempt=3
+          elif (( 10#$now_hm >= 2220 && 10#$now_hm < 2225 )); then
+            slot=22; attempt=1
+          elif (( 10#$now_hm >= 2225 && 10#$now_hm < 2230 )); then
+            slot=22; attempt=2
+          elif (( 10#$now_hm >= 2230 && 10#$now_hm < 2235 )); then
+            slot=22; attempt=3
+          else
+            echo "No active Beijing window at $(date '+%F %T'); skip push."
             exit 0
           fi
 
-          date_arg="$(date +%F)"
-          wait_until() {
-            local target="$1"
-            while true; do
-              local now epoch_target epoch_now sleep_seconds
-              now="$(date +%H:%M)"
-              epoch_now="$(date +%s)"
-              epoch_target="$(date -d "$(date +%F) $target:00" +%s)"
-              sleep_seconds=$(( epoch_target - epoch_now ))
-              if (( sleep_seconds <= 0 )); then
-                echo "Running target $target at Beijing $(date '+%F %T')"
-                return
-              fi
-              echo "Waiting ${sleep_seconds}s for Beijing $target; now $now"
-              sleep "$sleep_seconds"
-            done
-          }
-
-          wait_until "20:20"; run_one 20 1 "$date_arg"
-          wait_until "20:25"; run_one 20 2 "$date_arg"
-          wait_until "20:30"; run_one 20 3 "$date_arg"
-          wait_until "21:20"; run_one 21 1 "$date_arg"
-          wait_until "21:25"; run_one 21 2 "$date_arg"
-          wait_until "21:30"; run_one 21 3 "$date_arg"
-          wait_until "22:20"; run_one 22 1 "$date_arg"
-          wait_until "22:25"; run_one 22 2 "$date_arg"
-          wait_until "22:30"; run_one 22 3 "$date_arg"
+          echo "Running slot=$slot attempt=$attempt for Beijing $date_arg at $(date '+%F %T')"
+          run_one "$slot" "$attempt" "$date_arg"
 
       - name: Commit sent state
         if: ${{ github.event_name != 'workflow_dispatch' || inputs.dry_run != 'true' }}
