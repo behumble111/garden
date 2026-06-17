@@ -2,8 +2,8 @@ name: Garden XHS Cloud Codes
 
 on:
   schedule:
-    # Beijing 20:15-22:55. Runs outside active windows exit without pushing.
-    - cron: "*/5 12-14 * * *"
+    # Beijing 20:15. One runner waits for all evening checkpoints.
+    - cron: "15 12 * * *"
   workflow_dispatch:
     inputs:
       slot:
@@ -33,7 +33,7 @@ concurrency:
 jobs:
   collect-and-push:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 220
     env:
       TZ: Asia/Shanghai
       PYTHONUTF8: "1"
@@ -106,38 +106,56 @@ jobs:
             exit 0
           fi
 
-          now_h="$(date +%H)"
-          now_m="$(date +%M)"
-          now_hm="${now_h}${now_m}"
           date_arg="$(date +%F)"
-          slot=""
-          attempt=""
 
-          if (( 10#$now_hm >= 2020 && 10#$now_hm < 2025 )); then
-            slot=20; attempt=1
-          elif (( 10#$now_hm >= 2025 && 10#$now_hm < 2030 )); then
-            slot=20; attempt=2
-          elif (( 10#$now_hm >= 2030 && 10#$now_hm < 2035 )); then
-            slot=20; attempt=3
-          elif (( 10#$now_hm >= 2120 && 10#$now_hm < 2125 )); then
-            slot=21; attempt=1
-          elif (( 10#$now_hm >= 2125 && 10#$now_hm < 2130 )); then
-            slot=21; attempt=2
-          elif (( 10#$now_hm >= 2130 && 10#$now_hm < 2135 )); then
-            slot=21; attempt=3
-          elif (( 10#$now_hm >= 2220 && 10#$now_hm < 2225 )); then
-            slot=22; attempt=1
-          elif (( 10#$now_hm >= 2225 && 10#$now_hm < 2230 )); then
-            slot=22; attempt=2
-          elif (( 10#$now_hm >= 2230 && 10#$now_hm < 2235 )); then
-            slot=22; attempt=3
-          else
-            echo "No active Beijing window at $(date '+%F %T'); skip push."
+          start_hm="$(date +%H%M)"
+          if (( 10#$start_hm < 1900 || 10#$start_hm >= 2330 )); then
+            echo "Stale schedule start at $(date '+%F %T'); skip push."
             exit 0
           fi
 
-          echo "Running slot=$slot attempt=$attempt for Beijing $date_arg at $(date '+%F %T')"
-          run_one "$slot" "$attempt" "$date_arg"
+          run_checkpoint() {
+            local slot="$1"
+            local attempt="$2"
+            local target_time="$3"
+            local cutoff_time="$4"
+            local target_epoch
+            local cutoff_epoch
+            local now_epoch
+
+            target_epoch="$(date -d "$date_arg $target_time:00" +%s)"
+            cutoff_epoch="$(date -d "$date_arg $cutoff_time:00" +%s)"
+            now_epoch="$(date +%s)"
+
+            if (( now_epoch < target_epoch )); then
+              echo "Waiting for slot=$slot attempt=$attempt at $date_arg $target_time"
+              sleep "$(( target_epoch - now_epoch ))"
+            fi
+
+            now_epoch="$(date +%s)"
+            if (( now_epoch >= cutoff_epoch )); then
+              echo "Skip slot=$slot attempt=$attempt; past cutoff $cutoff_time."
+              return 0
+            fi
+
+            if (( attempt < 3 && now_epoch > target_epoch + 120 )); then
+              echo "Skip stale slot=$slot attempt=$attempt; next attempt will cover it."
+              return 0
+            fi
+
+            echo "Running slot=$slot attempt=$attempt for Beijing $date_arg at $(date '+%F %T')"
+            run_one "$slot" "$attempt" "$date_arg"
+          }
+
+          run_checkpoint 20 1 20:20 21:20
+          run_checkpoint 20 2 20:25 21:20
+          run_checkpoint 20 3 20:30 21:20
+          run_checkpoint 21 1 21:20 22:20
+          run_checkpoint 21 2 21:25 22:20
+          run_checkpoint 21 3 21:30 22:20
+          run_checkpoint 22 1 22:20 23:30
+          run_checkpoint 22 2 22:25 23:30
+          run_checkpoint 22 3 22:30 23:30
 
       - name: Commit sent state
         if: ${{ github.event_name != 'workflow_dispatch' || inputs.dry_run != 'true' }}
