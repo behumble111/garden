@@ -41,6 +41,7 @@ jobs:
       XHS_COOKIE: ${{ secrets.XHS_COOKIE }}
       SERVERCHAN_SEND_URL: ${{ secrets.SERVERCHAN_SEND_URL }}
       SERVERCHAN_SEND_URL_2: ${{ secrets.SERVERCHAN_SEND_URL_2 }}
+      GARDEN_SKIP_EMPTY_PUSH: "1"
 
     steps:
       - name: Check out repository
