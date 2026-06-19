@@ -339,8 +339,6 @@ def search_card_text(item):
 
 def relevant_search_result(item):
     text = search_card_text(item)
-    if is_excluded_source(text):
-        return False
     return GAME_NAME in text or "花园世界" in text or "兑换码" in text or "限时码" in text
 
 
@@ -351,6 +349,16 @@ def slot_text_matches(text, slot):
         "22": r"22点|22\s*[:：]\s*10|10点|十点|限时码\s*3|第三个限时码|限时码三",
     }
     return bool(re.search(patterns[slot], text, flags=re.I))
+
+
+def relevant_note_text(text, slot):
+    return (
+        slot_text_matches(text, slot)
+        or "兑换码" in text
+        or "限时码" in text
+        or "通码" in text
+        or "周码" in text
+    )
 
 
 def collect_from_xhs(slot, today):
@@ -402,23 +410,14 @@ def collect_from_xhs(slot, today):
 
             summary = note_summary(detail, url)
             full_text = f"{summary['title']} {summary['author']} {summary['desc']}"
-            if is_excluded_source(full_text):
-                continue
             if not note_is_today(summary, today):
                 print(f"Skip old note: {summary['author']} {summary['title']}", file=sys.stderr)
                 continue
-            if not slot_text_matches(full_text, slot):
-                print(f"Skip note without slot marker: {summary['author']} {summary['title']}", file=sys.stderr)
+            if not relevant_note_text(full_text, slot):
+                print(f"Skip note without code marker: {summary['author']} {summary['title']}", file=sys.stderr)
                 continue
 
             codes = extract_codes(summary["desc"], slot)
-            if not codes:
-                continue
-            target = SLOT_CONFIG[slot]["target"]
-            if target not in codes:
-                print(f"Skip note without target slot code: {summary['author']} {summary['title']}", file=sys.stderr)
-                continue
-
             summary = {**summary, "codes": codes, "official_score": official_score(full_text)}
             details.append(summary)
             for kind, code in codes.items():
@@ -502,6 +501,45 @@ def line_for(label, kind, codes, sources):
     return f"- {label}：{codes[kind]}（来源：{author}）"
 
 
+def compact_note_text(text, limit=1800):
+    text = normalize_text(text)
+    text = re.sub(r"\r\n?", "\n", text)
+    text = re.sub(r"\n{3,}", "\n\n", text).strip()
+    if len(text) <= limit:
+        return text
+    return text[:limit].rstrip() + "\n……（正文较长，已截断）"
+
+
+def build_raw_note_message(slot, attempt, today, details):
+    lines = [f"{GAME_NAME}兑换码原文转发 {today.isoformat()} {SLOT_CONFIG[slot]['label']}"]
+    lines.append("")
+    lines.append("说明：本次不再自动判断官服/微信服具体兑换码，直接转发相关博主当天兑换码笔记正文，请你自行摘取。")
+    lines.append("")
+
+    if not details:
+        lines.append("未抓到今天相关兑换码笔记。")
+        lines.append("")
+        lines.append(f"检查次数：第 {attempt}/3 次")
+        return "\n".join(lines)
+
+    for index, note in enumerate(details[:3], start=1):
+        title = note.get("title") or "无标题"
+        author = note.get("author") or "未知博主"
+        url = note.get("url") or ""
+        desc = compact_note_text(note.get("desc") or title)
+        lines.append(f"来源 {index}：{author}《{title}》")
+        if url:
+            lines.append(url)
+        lines.append("")
+        lines.append(desc)
+        lines.append("")
+        lines.append("---")
+        lines.append("")
+
+    lines.append(f"检查次数：第 {attempt}/3 次")
+    return "\n".join(lines).rstrip()
+
+
 def build_message(slot, attempt, today, codes, sources, state):
     lines = [f"{GAME_NAME}官服/微信版本兑换码 {today.isoformat()} {SLOT_CONFIG[slot]['label']}"]
     lines.append("")
@@ -556,6 +594,10 @@ def should_send(slot, attempt, codes):
     return bool(codes.get(target)) or attempt >= 3
 
 
+def should_send_raw_notes(attempt, details):
+    return bool(details) or attempt >= 3
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--slot", choices=["20", "21", "22"], required=True)
@@ -604,12 +646,12 @@ def main():
         save_state(state)
         return
 
-    if not should_send(args.slot, args.attempt, codes):
-        print("Not enough codes yet; skip push until next attempt.")
+    if not should_send_raw_notes(args.attempt, details):
+        print("No relevant note yet; skip push until next attempt.")
         return
 
-    message = build_message(args.slot, args.attempt, today, codes, sources, state)
-    title = f"{GAME_NAME}官服{SLOT_CONFIG[args.slot]['label']}"
+    message = build_raw_note_message(args.slot, args.attempt, today, details)
+    title = f"{GAME_NAME}{SLOT_CONFIG[args.slot]['label']}原文"
 
     if args.dry_run:
         print("DRY_RUN_MESSAGE_BEGIN")
@@ -621,6 +663,14 @@ def main():
     state.setdefault("sent_slots", {})[slot_key] = {
         "sent_at": now.isoformat(),
         "codes": codes,
+        "notes": [
+            {
+                "author": note.get("author"),
+                "title": note.get("title"),
+                "url": note.get("url"),
+            }
+            for note in details[:3]
+        ],
     }
     weekly_code = codes.get("weekly")
     if args.slot == "20" and weekly_code and weekly_code not in state.get("sent_week_codes", []):
