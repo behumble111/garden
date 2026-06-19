@@ -2,7 +2,8 @@ name: Garden XHS Cloud Codes
 
 on:
   schedule:
-    # Beijing 20:05. One runner waits for all evening checkpoints.
+    # Backup only. The primary timer should be an external cron service that calls workflow_dispatch.
+    # Beijing 20:05. One runner waits for all evening checkpoints when GitHub's schedule is not delayed.
     - cron: "5 12 * * *"
   workflow_dispatch:
     inputs:
