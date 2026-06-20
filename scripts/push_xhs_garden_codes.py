@@ -23,18 +23,29 @@ SERVERCHAN_FILE = ROOT / "serverchan_urls.txt"
 XHS_COOKIE_FILE = ROOT / "xhs_cookie.txt"
 
 KNOWN_CREATORS = [
+    "草莓熊崽",
+    "若水",
+    "jojomoonX",
+    "时光机无心",
     "喵喵嗷呜",
     "我的花园世界-金兰叶序",
-    "jojomoonX",
+    "唐僧给块肉呗",
     "我的花园世界",
 ]
 
+TRUSTED_CREATORS = ["草莓熊崽", "若水", "jojomoonX", "时光机无心", "我的花园世界-金兰叶序"]
 OFFICIAL_WORDS = ["官服", "微信", "微信小游戏", "小程序"]
 NON_OFFICIAL_WORDS = [
     "渠道服",
     "抖音服",
+    "抖服",
+    "斗服",
     "快手服",
     "小游戏中心",
+    "吱吱宝服",
+    "支吱宝服",
+    "支付宝服",
+    "蓝服",
     "九游",
     "TapTap",
     "taptap",
@@ -51,6 +62,7 @@ SLOT_CONFIG = {
         "keywords": ["20点兑换码", "8点兑换码", "八点兑换码", "限时码1", "20:00", "20点限时码"],
         "include_daily": True,
         "include_weekly": True,
+        "window": "20:05-20:20 左右",
     },
     "21": {
         "label": "21点限时码",
@@ -58,6 +70,7 @@ SLOT_CONFIG = {
         "keywords": ["21点兑换码", "9点兑换码", "九点兑换码", "限时码2", "21:10", "21点限时码"],
         "include_daily": False,
         "include_weekly": False,
+        "window": "21:23-21:38 左右",
     },
     "22": {
         "label": "22点限时码",
@@ -65,6 +78,7 @@ SLOT_CONFIG = {
         "keywords": ["22点兑换码", "10点兑换码", "十点兑换码", "限时码3", "22:10", "22点限时码"],
         "include_daily": False,
         "include_weekly": False,
+        "window": "22:00-22:20 左右",
     },
 }
 
@@ -253,6 +267,35 @@ def is_excluded_source(text):
     return any(word in text for word in NON_OFFICIAL_WORDS)
 
 
+def trusted_author(author):
+    return any(name in author for name in TRUSTED_CREATORS)
+
+
+def official_note_text(desc):
+    lines = re.split(r"[\n\r]+", normalize_text(desc))
+    selected = []
+    in_official = True
+    seen_section = False
+    for raw_line in lines:
+        line = raw_line.strip()
+        if not line:
+            if selected and selected[-1]:
+                selected.append("")
+            continue
+
+        if any(word in line for word in NON_OFFICIAL_WORDS):
+            in_official = False
+            seen_section = True
+            continue
+        if any(word in line for word in OFFICIAL_WORDS) or re.search(r"官服ID|ys开头", line, flags=re.I):
+            in_official = True
+            seen_section = True
+
+        if in_official or not seen_section:
+            selected.append(line)
+    return "\n".join(selected)
+
+
 def extract_by_labels(desc):
     found = {}
     patterns = [
@@ -304,19 +347,63 @@ def infer_code_kind(line, slot):
 
 
 def extract_codes(desc, slot):
-    found = extract_by_labels(desc)
-    for line, code in extract_line_candidates(desc):
+    official_text = official_note_text(desc)
+    found = extract_by_labels(official_text)
+    for line, code in extract_line_candidates(official_text):
         kind = infer_code_kind(line, slot)
         if kind and kind not in found:
             found[kind] = code
     return found
 
 
+def aggregate_candidates(candidates):
+    grouped = {}
+    for item in candidates:
+        grouped.setdefault(item["kind"], {}).setdefault(
+            item["code"],
+            {"score": 0, "sources": [], "authors": set(), "trusted": 0},
+        )
+        bucket = grouped[item["kind"]][item["code"]]
+        source = item["source"]
+        author = source.get("author") or "未知来源"
+        author_key = author.lower()
+        if author_key not in bucket["authors"]:
+            bucket["authors"].add(author_key)
+            bucket["sources"].append(source)
+            bucket["score"] += 10
+            if trusted_author(author):
+                bucket["score"] += 8
+                bucket["trusted"] += 1
+        bucket["score"] += max(0, item.get("score", 0))
+
+    codes = {}
+    evidence = {}
+    for kind, by_code in grouped.items():
+        code, data = sorted(
+            by_code.items(),
+            key=lambda pair: (pair[1]["score"], len(pair[1]["authors"]), pair[1]["trusted"]),
+            reverse=True,
+        )[0]
+        codes[kind] = code
+        evidence[kind] = {
+            "sources": data["sources"],
+            "source_count": len(data["authors"]),
+            "trusted_count": data["trusted"],
+            "score": data["score"],
+        }
+    return codes, evidence
+
+
 def build_queries(today, slot):
     md = f"{today.month}.{today.day}"
     md2 = f"{today.month}月{today.day}日"
     config = SLOT_CONFIG[slot]
-    base = [
+    base = []
+    base.extend(f"{creator} {GAME_NAME} 官服 {md}兑换码" for creator in TRUSTED_CREATORS)
+    base.extend(f"{creator} {GAME_NAME} {config['label']}" for creator in TRUSTED_CREATORS)
+    base.extend(f"{creator} {GAME_NAME} 官服 兑换码" for creator in TRUSTED_CREATORS)
+    base.extend(f"{creator} {GAME_NAME} 兑换码" for creator in TRUSTED_CREATORS)
+    base.extend([
         f"{GAME_NAME} 官服 {md}兑换码",
         f"{GAME_NAME} {md}兑换码",
         f"{GAME_NAME} 微信 {md2}兑换码",
@@ -327,7 +414,7 @@ def build_queries(today, slot):
         f"{GAME_NAME} 今日通码",
         f"{GAME_NAME} 官服 {config['label']}",
         f"{GAME_NAME} {config['label']}",
-    ]
+    ])
     base.extend(f"{creator} {GAME_NAME} 官服 兑换码" for creator in KNOWN_CREATORS)
     base.extend(f"{creator} {GAME_NAME} 兑换码" for creator in KNOWN_CREATORS)
     base.extend(f"{GAME_NAME} 官服 {kw}" for kw in config["keywords"])
@@ -378,16 +465,22 @@ def collect_from_xhs(slot, today):
     seen = set()
     details = []
     candidates = []
+    auth_failures = 0
 
     for query in build_queries(today, slot):
+        if auth_failures >= 3:
+            print("Stop search after repeated XHS auth failures.", file=sys.stderr)
+            break
         print(f"Search query: {query}", file=sys.stderr)
         try:
             items = xhs_search(query)
         except Exception as exc:
             if any(marker in str(exc) for marker in ["登录已过期", "login", "cookie", "Cookie", "unauthorized"]):
                 AUTH_FAILED = True
+                auth_failures += 1
             print(f"Search failed: {query}: {exc}", file=sys.stderr)
             continue
+        auth_failures = 0
         print(f"Search returned {len(items)} items: {query}", file=sys.stderr)
         if items:
             samples = []
@@ -447,14 +540,8 @@ def collect_from_xhs(slot, today):
         if len(details) >= 8:
             break
 
-    merged = {}
-    sources = {}
-    for item in sorted(candidates, key=lambda c: c["score"], reverse=True):
-        if item["kind"] not in merged:
-            merged[item["kind"]] = item["code"]
-            sources[item["kind"]] = item["source"]
-
-    return merged, sources, details
+    codes, evidence = aggregate_candidates(candidates)
+    return codes, evidence, details
 
 
 def normalize_serverchan_url(value):
@@ -522,12 +609,80 @@ def compact_note_text(text, limit=1800):
     return text[:limit].rstrip() + "\n……（正文较长，已截断）"
 
 
+def evidence_line(kind, evidence):
+    data = evidence.get(kind) or {}
+    sources = data.get("sources") or []
+    names = []
+    for src in sources[:4]:
+        author = src.get("author") or "未知来源"
+        if author not in names:
+            names.append(author)
+    if not names:
+        return "佐证：暂无稳定来源"
+    if data.get("source_count", 0) >= 2:
+        return f"佐证：{data['source_count']} 个来源一致（{'、'.join(names)}）"
+    return f"佐证：单来源（{names[0]}）"
+
+
+def code_block(label, code, kind, evidence):
+    lines = [f"### **{label}**", f"## **{code}**", f"复制：`{code}`", evidence_line(kind, evidence)]
+    return lines
+
+
+def build_summary_message(slot, attempt, today, codes, evidence, details, source_label):
+    config = SLOT_CONFIG[slot]
+    lines = [f"{GAME_NAME}官服/微信版本兑换码 {today.isoformat()}"]
+    lines.append("")
+    lines.append(f"来源：{source_label}")
+    lines.append("")
+    lines.append(f"检查次数：第 {attempt}/3 次")
+    lines.append("")
+
+    if slot == "20":
+        if codes.get("weekly"):
+            lines.extend(code_block("本周周码", codes["weekly"], "weekly", evidence))
+            lines.append("")
+        if codes.get("daily"):
+            lines.extend(code_block("今日通码（官服）", codes["daily"], "daily", evidence))
+            lines.append("")
+        if codes.get("limited_20"):
+            lines.extend(code_block(f"官服 20点限时码（{SLOT_CONFIG['20']['window']}）", codes["limited_20"], "limited_20", evidence))
+    elif slot == "21" and codes.get("limited_21"):
+        lines.extend(code_block(f"官服 21点限时码（{SLOT_CONFIG['21']['window']}）", codes["limited_21"], "limited_21", evidence))
+    elif slot == "22" and codes.get("limited_22"):
+        lines.extend(code_block(f"官服 22点限时码（{SLOT_CONFIG['22']['window']}）", codes["limited_22"], "limited_22", evidence))
+    else:
+        lines.append(f"未确认到 {config['label']}。")
+
+    lines.append("")
+    lines.append("来源笔记：")
+    used = set()
+    for data in evidence.values():
+        for src in (data.get("sources") or []):
+            key = src.get("url") or f"{src.get('author')}:{src.get('title')}"
+            if key in used:
+                continue
+            used.add(key)
+            lines.append(f"- {src.get('author', '未知来源')}《{src.get('title', '')}》")
+            if src.get("url"):
+                lines.append(f"  {src['url']}")
+            if len(used) >= 5:
+                break
+        if len(used) >= 5:
+            break
+
+    if details and not used:
+        lines.append(f"- 已找到 {len(details)} 条相关笔记，但未形成可发送的官服码。")
+
+    return "\n".join(lines).rstrip()
+
+
 def build_raw_note_message(slot, attempt, today, details, source_label):
     lines = [f"{GAME_NAME}兑换码原文转发 {today.isoformat()} {SLOT_CONFIG[slot]['label']}"]
     lines.append("")
     lines.append(f"来源：{source_label}")
     lines.append("")
-    lines.append("说明：本次不再自动判断官服/微信服具体兑换码，直接转发相关博主当天兑换码笔记正文，请你自行摘取。")
+    lines.append("说明：本次直接转发相关博主当天兑换码笔记正文，请你自行摘取。")
     lines.append("")
 
     if not details:
@@ -616,6 +771,13 @@ def should_send_raw_notes(attempt, details):
     return bool(details) or attempt >= 3
 
 
+def should_send_codes(slot, codes):
+    target = SLOT_CONFIG[slot]["target"]
+    if slot == "20":
+        return bool(codes.get(target) or codes.get("daily") or codes.get("weekly"))
+    return bool(codes.get(target))
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--slot", choices=["20", "21", "22"], required=True)
@@ -641,7 +803,7 @@ def main():
         print(f"Already sent {slot_key}; skip.")
         return
 
-    codes, sources, details = collect_from_xhs(args.slot, today)
+    codes, evidence, details = collect_from_xhs(args.slot, today)
     print(json.dumps({"codes": codes, "details_found": len(details)}, ensure_ascii=False, indent=2))
 
     if os.environ.get("GARDEN_SKIP_EMPTY_PUSH") == "1" and not codes and not details and not AUTH_FAILED:
@@ -669,12 +831,12 @@ def main():
         save_state(state)
         return
 
-    if not should_send_raw_notes(args.attempt, details):
-        print("No relevant note yet; skip push until next attempt.")
+    if not should_send_codes(args.slot, codes):
+        print("No confirmed official code yet; skip push until next attempt.")
         return
 
-    message = build_raw_note_message(args.slot, args.attempt, today, details, source_label)
-    title = f"{GAME_NAME}{SLOT_CONFIG[args.slot]['label']}原文"
+    message = build_summary_message(args.slot, args.attempt, today, codes, evidence, details, source_label)
+    title = f"{GAME_NAME}{SLOT_CONFIG[args.slot]['label']}官服"
 
     if args.dry_run:
         print("DRY_RUN_MESSAGE_BEGIN")
@@ -687,6 +849,21 @@ def main():
         "sent_at": now.isoformat(),
         "source": source_label,
         "codes": codes,
+        "evidence": {
+            kind: {
+                "source_count": data.get("source_count", 0),
+                "trusted_count": data.get("trusted_count", 0),
+                "sources": [
+                    {
+                        "author": source.get("author"),
+                        "title": source.get("title"),
+                        "url": source.get("url"),
+                    }
+                    for source in (data.get("sources") or [])[:5]
+                ],
+            }
+            for kind, data in evidence.items()
+        },
         "notes": [
             {
                 "author": note.get("author"),
