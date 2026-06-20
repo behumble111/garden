@@ -1,6 +1,11 @@
-# 花园兑换码外部云端定时
+# 花园兑换码云端定时
 
-GitHub Actions 的 `schedule` 可能严重延迟。主定时器改用外部 cron 服务主动调用 GitHub `workflow_dispatch`，GitHub `schedule` 只作为备用。
+当前云端方案使用 GitHub Actions 短任务模式：每次运行只检查一个时间点，不再启动一个 runner 等完整晚。外部 cron 服务主动调用 `workflow_dispatch` 仍然是主定时器，GitHub `schedule` 配置了同一组时间作为备用。
+
+推送正文会标出来源：
+
+- `来源：云端 GitHub`
+- `来源：本地 Windows`
 
 ## GitHub Token
 
@@ -41,9 +46,9 @@ Body 模板：
 
 `date` 留空时，GitHub runner 会按 `TZ: Asia/Shanghai` 使用当天北京时间日期。
 
-## 定时表
+## 外部定时表
 
-外部服务如果使用 UTC 时间，按下面配置；括号内是北京时间。
+外部服务如果使用 UTC 时间，按下面配置；括号内是北京时间。GitHub workflow 内置的备用 `schedule` 也是同一张表。
 
 | UTC cron | 北京时间 | Body inputs |
 |---|---:|---|
@@ -67,3 +72,8 @@ Body 模板：
 - 运行分支是 `main`。
 - 运行结论是 `success`。
 - 正式任务的 `dry_run` 是 `"false"`。
+- 手机推送正文里出现 `来源：云端 GitHub`。
+
+## 旧 workflow
+
+`garden-codes.yml` 是早期公开网页搜索方案，现在只保留手动触发，不再自动定时运行。自动推送以 `garden-xhs-cloud.yml` 为准。
