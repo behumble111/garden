@@ -1,18 +1,10 @@
 name: Garden Codes
 
 on:
-  schedule:
-    # Poll every 5 minutes from Beijing 19:00 to 23:55.
-    - cron: "*/5 11-15 * * *"
   workflow_dispatch:
-    inputs:
-      slot:
-        description: "Unused manual input kept for compatibility"
-        required: false
-        default: ""
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   collect-and-push:
@@ -25,18 +17,4 @@ jobs:
         env:
           SERVERCHAN_SEND_URL: ${{ secrets.SERVERCHAN_SEND_URL }}
           SERVERCHAN_SEND_URL_2: ${{ secrets.SERVERCHAN_SEND_URL_2 }}
-          GARDEN_SLOT: ${{ github.event.inputs.slot }}
-          GARDEN_FORCE_STATUS: ${{ github.event_name == 'workflow_dispatch' }}
         run: python scripts/collect_garden_codes.py
-
-      - name: Persist sent state
-        run: |
-          if [ -n "$(git status --porcelain .github/state/garden-sent.json)" ]; then
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add .github/state/garden-sent.json
-            git commit -m "Update garden push state"
-            git push
-          else
-            echo "No sent state change."
-          fi
