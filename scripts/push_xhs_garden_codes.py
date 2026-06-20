@@ -86,7 +86,11 @@ def find_xhs_upstream():
         ]
     )
     for candidate in candidates:
-        if candidate.exists():
+        try:
+            exists = candidate.exists()
+        except OSError:
+            exists = False
+        if exists:
             return candidate
     return candidates[0]
 
@@ -94,6 +98,14 @@ def find_xhs_upstream():
 XHS_UPSTREAM = find_xhs_upstream()
 NODE_BIN = Path.home() / ".cache" / "codex-runtimes" / "codex-primary-runtime" / "dependencies" / "node" / "bin"
 AUTH_FAILED = False
+
+
+def clean_env_text(value):
+    return (value or "").lstrip("\ufeff").strip()
+
+
+def run_source_label():
+    return clean_env_text(os.environ.get("GARDEN_RUN_SOURCE")) or "本地 Windows"
 
 
 def load_state():
@@ -111,9 +123,9 @@ def save_state(state):
 
 def load_xhs_cookie():
     if os.environ.get("XHS_COOKIE"):
-        return os.environ["XHS_COOKIE"].strip()
+        return clean_env_text(os.environ["XHS_COOKIE"])
     if XHS_COOKIE_FILE.exists():
-        return XHS_COOKIE_FILE.read_text(encoding="utf-8").strip()
+        return clean_env_text(XHS_COOKIE_FILE.read_text(encoding="utf-8"))
     return ""
 
 
@@ -510,8 +522,10 @@ def compact_note_text(text, limit=1800):
     return text[:limit].rstrip() + "\n……（正文较长，已截断）"
 
 
-def build_raw_note_message(slot, attempt, today, details):
+def build_raw_note_message(slot, attempt, today, details, source_label):
     lines = [f"{GAME_NAME}兑换码原文转发 {today.isoformat()} {SLOT_CONFIG[slot]['label']}"]
+    lines.append("")
+    lines.append(f"来源：{source_label}")
     lines.append("")
     lines.append("说明：本次不再自动判断官服/微信服具体兑换码，直接转发相关博主当天兑换码笔记正文，请你自行摘取。")
     lines.append("")
@@ -540,8 +554,10 @@ def build_raw_note_message(slot, attempt, today, details):
     return "\n".join(lines).rstrip()
 
 
-def build_message(slot, attempt, today, codes, sources, state):
+def build_message(slot, attempt, today, codes, sources, state, source_label):
     lines = [f"{GAME_NAME}官服/微信版本兑换码 {today.isoformat()} {SLOT_CONFIG[slot]['label']}"]
+    lines.append("")
+    lines.append(f"来源：{source_label}")
     lines.append("")
 
     if slot == "20":
@@ -573,10 +589,12 @@ def build_message(slot, attempt, today, codes, sources, state):
     return "\n".join(lines)
 
 
-def build_auth_failed_message(today):
+def build_auth_failed_message(today, source_label):
     return "\n".join(
         [
             f"{GAME_NAME}官服/微信版本兑换码 {today.isoformat()}",
+            "",
+            f"来源：{source_label}",
             "",
             "小红书登录已过期，无法搜索兑换码。",
             "",
@@ -606,11 +624,12 @@ def main():
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--test-message", action="store_true")
     args = parser.parse_args()
+    source_label = run_source_label()
 
     if args.test_message:
         push_serverchan(
             f"{GAME_NAME}官服推送测试",
-            f"{GAME_NAME}官服/微信版本推送测试\n\n如果两个手机都收到，说明本地双 Server 酱配置正常。",
+            f"{GAME_NAME}官服/微信版本推送测试\n\n来源：{source_label}\n\n如果两个手机都收到，说明本地双 Server 酱配置正常。",
         )
         return
 
@@ -634,7 +653,7 @@ def main():
         if not args.dry_run and state.get("sent_slots", {}).get(alert_key):
             print(f"Already sent {alert_key}; skip.")
             return
-        message = build_auth_failed_message(today)
+        message = build_auth_failed_message(today, source_label)
         title = f"{GAME_NAME}小红书登录已过期"
         if args.dry_run:
             print("DRY_RUN_MESSAGE_BEGIN")
@@ -642,7 +661,11 @@ def main():
             print("DRY_RUN_MESSAGE_END")
             return
         push_serverchan(title, message)
-        state.setdefault("sent_slots", {})[alert_key] = {"sent_at": now.isoformat(), "codes": {}}
+        state.setdefault("sent_slots", {})[alert_key] = {
+            "sent_at": now.isoformat(),
+            "source": source_label,
+            "codes": {},
+        }
         save_state(state)
         return
 
@@ -650,7 +673,7 @@ def main():
         print("No relevant note yet; skip push until next attempt.")
         return
 
-    message = build_raw_note_message(args.slot, args.attempt, today, details)
+    message = build_raw_note_message(args.slot, args.attempt, today, details, source_label)
     title = f"{GAME_NAME}{SLOT_CONFIG[args.slot]['label']}原文"
 
     if args.dry_run:
@@ -662,6 +685,7 @@ def main():
     push_serverchan(title, message)
     state.setdefault("sent_slots", {})[slot_key] = {
         "sent_at": now.isoformat(),
+        "source": source_label,
         "codes": codes,
         "notes": [
             {
