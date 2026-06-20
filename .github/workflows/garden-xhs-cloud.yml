@@ -2,9 +2,17 @@ name: Garden XHS Cloud Codes
 
 on:
   schedule:
-    # Backup only. The primary timer should be an external cron service that calls workflow_dispatch.
-    # Beijing 20:05. One runner waits for all evening checkpoints when GitHub's schedule is not delayed.
-    - cron: "5 12 * * *"
+    # Backup timers. Primary timers can still call workflow_dispatch from an external cron service.
+    # GitHub schedules use UTC; comments show Beijing time.
+    - cron: "10 12 * * *" # 20:10 slot=20 attempt=1
+    - cron: "15 12 * * *" # 20:15 slot=20 attempt=2
+    - cron: "20 12 * * *" # 20:20 slot=20 attempt=3
+    - cron: "10 13 * * *" # 21:10 slot=21 attempt=1
+    - cron: "15 13 * * *" # 21:15 slot=21 attempt=2
+    - cron: "20 13 * * *" # 21:20 slot=21 attempt=3
+    - cron: "10 14 * * *" # 22:10 slot=22 attempt=1
+    - cron: "15 14 * * *" # 22:15 slot=22 attempt=2
+    - cron: "20 14 * * *" # 22:20 slot=22 attempt=3
   workflow_dispatch:
     inputs:
       slot:
@@ -34,11 +42,12 @@ concurrency:
 jobs:
   collect-and-push:
     runs-on: ubuntu-latest
-    timeout-minutes: 220
+    timeout-minutes: 45
     env:
       TZ: Asia/Shanghai
       PYTHONUTF8: "1"
       PYTHONIOENCODING: "utf-8"
+      GARDEN_RUN_SOURCE: "云端 GitHub"
       XHS_COOKIE: ${{ secrets.XHS_COOKIE }}
       SERVERCHAN_SEND_URL: ${{ secrets.SERVERCHAN_SEND_URL }}
       SERVERCHAN_SEND_URL_2: ${{ secrets.SERVERCHAN_SEND_URL_2 }}
@@ -49,6 +58,10 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - name: Sync latest sent state
+        shell: bash
+        run: git pull --rebase
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -65,7 +78,7 @@ jobs:
         shell: bash
         run: |
           python -m pip install --upgrade pip
-          python -m pip install all-in-one-aione
+          python -m pip install all-in-one-aione platformdirs
           aione setup
 
       - name: Save XHS cookie
@@ -75,7 +88,8 @@ jobs:
             echo "Missing XHS_COOKIE secret"
             exit 1
           fi
-          aione auth xhs set-cookie --profile pc --cookie "$XHS_COOKIE"
+          clean_cookie="$(python -c 'import os; print((os.environ.get("XHS_COOKIE") or "").lstrip("\ufeff").strip())')"
+          aione auth xhs set-cookie --profile pc --cookie "$clean_cookie"
 
       - name: Collect and push
         shell: bash
@@ -94,69 +108,45 @@ jobs:
               "$@"
           }
 
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            extra_args=()
-            if [[ "${{ inputs.dry_run }}" == "true" ]]; then
-              extra_args+=(--dry-run)
-            fi
-            date_arg="${{ inputs.date }}"
-            if [[ -z "$date_arg" ]]; then
-              date_arg="$(date +%F)"
-            fi
-            run_one "${{ inputs.slot }}" "${{ inputs.attempt }}" "$date_arg" "${extra_args[@]}"
-            exit 0
-          fi
-
+          slot=""
+          attempt=""
+          dry_run="false"
           date_arg="$(date +%F)"
 
-          start_hm="$(date +%H%M)"
-          if (( 10#$start_hm < 1900 || 10#$start_hm >= 2330 )); then
-            echo "Stale schedule start at $(date '+%F %T'); skip push."
-            exit 0
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            slot="${{ inputs.slot }}"
+            attempt="${{ inputs.attempt }}"
+            if [[ "${{ inputs.dry_run }}" == "true" ]]; then
+              dry_run="true"
+            fi
+            if [[ -n "${{ inputs.date }}" ]]; then
+              date_arg="${{ inputs.date }}"
+            fi
+          else
+            case "${{ github.event.schedule }}" in
+              "10 12 * * *") slot="20"; attempt="1" ;;
+              "15 12 * * *") slot="20"; attempt="2" ;;
+              "20 12 * * *") slot="20"; attempt="3" ;;
+              "10 13 * * *") slot="21"; attempt="1" ;;
+              "15 13 * * *") slot="21"; attempt="2" ;;
+              "20 13 * * *") slot="21"; attempt="3" ;;
+              "10 14 * * *") slot="22"; attempt="1" ;;
+              "15 14 * * *") slot="22"; attempt="2" ;;
+              "20 14 * * *") slot="22"; attempt="3" ;;
+              *)
+                echo "Unknown schedule: ${{ github.event.schedule }}"
+                exit 1
+                ;;
+            esac
           fi
 
-          run_checkpoint() {
-            local slot="$1"
-            local attempt="$2"
-            local target_time="$3"
-            local cutoff_time="$4"
-            local target_epoch
-            local cutoff_epoch
-            local now_epoch
+          extra_args=()
+          if [[ "$dry_run" == "true" ]]; then
+            extra_args+=(--dry-run)
+          fi
 
-            target_epoch="$(date -d "$date_arg $target_time:00" +%s)"
-            cutoff_epoch="$(date -d "$date_arg $cutoff_time:00" +%s)"
-            now_epoch="$(date +%s)"
-
-            if (( now_epoch < target_epoch )); then
-              echo "Waiting for slot=$slot attempt=$attempt at $date_arg $target_time"
-              sleep "$(( target_epoch - now_epoch ))"
-            fi
-
-            now_epoch="$(date +%s)"
-            if (( now_epoch >= cutoff_epoch )); then
-              echo "Skip slot=$slot attempt=$attempt; past cutoff $cutoff_time."
-              return 0
-            fi
-
-            if (( attempt < 3 && now_epoch > target_epoch + 120 )); then
-              echo "Skip stale slot=$slot attempt=$attempt; next attempt will cover it."
-              return 0
-            fi
-
-            echo "Running slot=$slot attempt=$attempt for Beijing $date_arg at $(date '+%F %T')"
-            run_one "$slot" "$attempt" "$date_arg"
-          }
-
-          run_checkpoint 20 1 20:10 21:10
-          run_checkpoint 20 2 20:15 21:10
-          run_checkpoint 20 3 20:20 21:10
-          run_checkpoint 21 1 21:10 22:10
-          run_checkpoint 21 2 21:15 22:10
-          run_checkpoint 21 3 21:20 22:10
-          run_checkpoint 22 1 22:10 23:30
-          run_checkpoint 22 2 22:15 23:30
-          run_checkpoint 22 3 22:20 23:30
+          echo "Running source=$GARDEN_RUN_SOURCE slot=$slot attempt=$attempt date=$date_arg dry_run=$dry_run at $(date '+%F %T')"
+          run_one "$slot" "$attempt" "$date_arg" "${extra_args[@]}"
 
       - name: Commit sent state
         if: ${{ github.event_name != 'workflow_dispatch' || inputs.dry_run != 'true' }}
@@ -167,7 +157,6 @@ jobs:
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git add .garden_code_state.json
             git commit -m "Update garden code sent state"
-            git pull --rebase
             git push
           else
             echo "No sent state changes."
