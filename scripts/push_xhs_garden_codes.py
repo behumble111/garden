@@ -341,8 +341,6 @@ def infer_code_kind(line, slot):
         return "limited_21"
     if re.search(r"22点|22\s*[:：]\s*10|10点|十点|限时码\s*3|第三个", line):
         return "limited_22"
-    if re.search(r"兑换码|限时码", line):
-        return SLOT_CONFIG[slot]["target"]
     return ""
 
 
