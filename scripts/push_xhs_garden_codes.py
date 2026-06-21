@@ -351,6 +351,10 @@ def extract_codes(desc, slot):
         kind = infer_code_kind(line, slot)
         if kind and kind not in found:
             found[kind] = code
+    base_codes = {found.get("weekly"), found.get("daily")} - {None, ""}
+    for kind in ("limited_20", "limited_21", "limited_22"):
+        if found.get(kind) in base_codes:
+            found.pop(kind, None)
     return found
 
 
@@ -397,10 +401,11 @@ def build_queries(today, slot):
     md2 = f"{today.month}月{today.day}日"
     config = SLOT_CONFIG[slot]
     base = []
-    base.extend(f"{creator} {GAME_NAME} 官服 {md}兑换码" for creator in TRUSTED_CREATORS)
-    base.extend(f"{creator} {GAME_NAME} {config['label']}" for creator in TRUSTED_CREATORS)
-    base.extend(f"{creator} {GAME_NAME} 官服 兑换码" for creator in TRUSTED_CREATORS)
-    base.extend(f"{creator} {GAME_NAME} 兑换码" for creator in TRUSTED_CREATORS)
+    for creator in TRUSTED_CREATORS:
+        base.append(f"{creator} {GAME_NAME} {config['label']}")
+        base.append(f"{creator} {GAME_NAME} 官服 {md}兑换码")
+        base.append(f"{creator} {GAME_NAME} 官服 兑换码")
+        base.append(f"{creator} {GAME_NAME} 兑换码")
     base.extend([
         f"{GAME_NAME} 官服 {md}兑换码",
         f"{GAME_NAME} {md}兑换码",
@@ -533,9 +538,14 @@ def collect_from_xhs(slot, today):
                     }
                 )
 
-            if len(details) >= 8:
+            if len(details) >= 12 and any(
+                candidate["kind"] == SLOT_CONFIG[slot]["target"] for candidate in candidates
+            ):
                 break
-        if len(details) >= 8:
+        if len(details) >= 18 or (
+            len(details) >= 12
+            and any(candidate["kind"] == SLOT_CONFIG[slot]["target"] for candidate in candidates)
+        ):
             break
 
     codes, evidence = aggregate_candidates(candidates)
